@@ -62,10 +62,22 @@ pub fn render_database_explorer(
                                 None => "[DB] ",
                             }
                         },
+                        NodeKind::Database => "[DB] ",
                         NodeKind::Schema => "[S] ",
+                        NodeKind::Folder => "[F] ",
                         NodeKind::Table => "[T] ",
                         NodeKind::View => "[V] ",
-                        _ => "",
+                        NodeKind::Column => {
+                            if node.is_primary_key {
+                                "[PK] "
+                            } else {
+                                ""
+                            }
+                        },
+                        NodeKind::Key => "[K] ",
+                        NodeKind::ForeignKey => "[FK] ",
+                        NodeKind::Index => "[I] ",
+                        NodeKind::Loading => "",
                     };
                     Span::styled(ascii.to_string(), Style::default().fg(*icon_color))
                 }
@@ -76,12 +88,34 @@ pub fn render_database_explorer(
             let text = match node.kind {
                 NodeKind::Column => {
                     let nullable_str = if node.nullable { "" } else { " NOT NULL" };
+                    let pk_str = if node.is_primary_key { " [PK]" } else { "" };
                     format!(
-                        "{} {}{}",
+                        "{} {}{}{}",
                         node.name,
                         node.data_type.as_deref().unwrap_or(""),
-                        nullable_str
+                        nullable_str,
+                        pk_str
                     )
+                },
+                NodeKind::Folder => {
+                    let count = node.child_count;
+                    format!("{} {}", node.name, count)
+                },
+                NodeKind::Index => {
+                    let cols = node.columns.as_ref().map(|c| c.join(", ")).unwrap_or_default();
+                    let unique_str = if node.is_unique { " UNIQUE" } else { "" };
+                    format!("{} ({}){}", node.name, cols, unique_str)
+                },
+                NodeKind::ForeignKey => {
+                    let cols = node.columns.as_ref().map(|c| c.join(", ")).unwrap_or_default();
+                    let ref_cols =
+                        node.ref_columns.as_ref().map(|c| c.join(", ")).unwrap_or_default();
+                    let ref_table = node.ref_table.as_deref().unwrap_or("?");
+                    format!("{} ({}) -> {}({})", node.name, cols, ref_table, ref_cols)
+                },
+                NodeKind::Key => {
+                    let cols = node.columns.as_ref().map(|c| c.join(", ")).unwrap_or_default();
+                    format!("{} ({})", node.name, cols)
                 },
                 _ => node.name.clone(),
             };

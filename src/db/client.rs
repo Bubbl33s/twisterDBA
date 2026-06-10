@@ -2,12 +2,16 @@ use std::collections::HashMap;
 
 use crate::db::backend::{DbBackend, EngineType};
 use crate::db::mysql::{
-    execute_mysql_query, load_mysql_columns, load_mysql_schema, load_mysql_table_info,
+    execute_mysql_query, load_mysql_columns, load_mysql_schema, load_mysql_table_details,
+    load_mysql_table_info,
 };
 use crate::db::pg_exec::execute_pg_query;
-use crate::db::pg_schema::{load_pg_columns, load_pg_schema, load_pg_table_info};
+use crate::db::pg_schema::{
+    load_pg_columns, load_pg_schema, load_pg_table_details, load_pg_table_info,
+};
 use crate::db::sqlite::{
-    execute_sqlite_query, load_sqlite_columns, load_sqlite_schema, load_sqlite_table_info,
+    execute_sqlite_query, load_sqlite_columns, load_sqlite_schema, load_sqlite_table_details,
+    load_sqlite_table_info,
 };
 use crate::events::{AppEvent, DbEvent};
 use secrecy::SecretString;
@@ -27,7 +31,13 @@ pub enum DbCommand {
     LoadSchema {
         connection_name: String,
     },
+    #[allow(dead_code)]
     LoadColumns {
+        connection_name: String,
+        schema: String,
+        table: String,
+    },
+    LoadTableDetails {
         connection_name: String,
         schema: String,
         table: String,
@@ -82,6 +92,9 @@ impl DbClient {
                 },
                 DbCommand::LoadColumns { connection_name, schema, table } => {
                     self.handle_load_columns(&connection_name, &schema, &table).await;
+                },
+                DbCommand::LoadTableDetails { connection_name, schema, table } => {
+                    self.handle_load_table_details(&connection_name, &schema, &table).await;
                 },
                 DbCommand::LoadTableInfo { connection_name, schema, table } => {
                     self.handle_load_table_info(&connection_name, &schema, &table).await;
@@ -245,6 +258,61 @@ impl DbClient {
                 },
                 Err(e) => {
                     error!("SQLite LoadColumns failed: {e}");
+                },
+            },
+            DbBackend::Disconnected => {},
+        }
+    }
+
+    async fn handle_load_table_details(
+        &mut self,
+        connection_name: &str,
+        schema: &str,
+        table: &str,
+    ) {
+        let backend = match self.backends.get(connection_name) {
+            Some(b) => b,
+            None => return,
+        };
+
+        match backend {
+            DbBackend::Pg(pool) => match load_pg_table_details(pool, schema, table).await {
+                Ok(details) => {
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableDetailsLoaded {
+                        connection_name: connection_name.to_string(),
+                        schema: schema.to_string(),
+                        table: table.to_string(),
+                        details,
+                    }));
+                },
+                Err(e) => {
+                    error!("LoadTableDetails failed: {e}");
+                },
+            },
+            DbBackend::Mysql(pool) => match load_mysql_table_details(pool, schema, table).await {
+                Ok(details) => {
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableDetailsLoaded {
+                        connection_name: connection_name.to_string(),
+                        schema: schema.to_string(),
+                        table: table.to_string(),
+                        details,
+                    }));
+                },
+                Err(e) => {
+                    error!("MySQL LoadTableDetails failed: {e}");
+                },
+            },
+            DbBackend::Sqlite(pool) => match load_sqlite_table_details(pool, schema, table).await {
+                Ok(details) => {
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableDetailsLoaded {
+                        connection_name: connection_name.to_string(),
+                        schema: schema.to_string(),
+                        table: table.to_string(),
+                        details,
+                    }));
+                },
+                Err(e) => {
+                    error!("SQLite LoadTableDetails failed: {e}");
                 },
             },
             DbBackend::Disconnected => {},

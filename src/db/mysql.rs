@@ -1,5 +1,7 @@
-use crate::events::{AppEvent, ColumnInfo, DbEvent, TableInfo};
-use crate::explorer::SchemaNode;
+use crate::events::{
+    AppEvent, ColumnInfo, DbEvent, ForeignKeyInfo, IndexInfo, KeyInfo, TableDetails, TableInfo,
+};
+use crate::explorer::{FolderKind, SchemaNode};
 use crate::result::ColumnMeta;
 use futures_util::StreamExt;
 use sqlx::{Column, MySqlPool, Row, TypeInfo};
@@ -19,7 +21,9 @@ pub async fn load_mysql_schema(pool: &MySqlPool) -> Result<Vec<SchemaNode>, Stri
     .await
     .map_err(|e| format!("MySQL schema query: {e}"))?;
 
-    let mut schemas: BTreeMap<String, Vec<SchemaNode>> = BTreeMap::new();
+    #[allow(clippy::type_complexity)]
+    let mut databases: BTreeMap<String, BTreeMap<String, (Vec<SchemaNode>, Vec<SchemaNode>)>> =
+        BTreeMap::new();
 
     for row in &rows {
         let schema_name: String = row.get("TABLE_SCHEMA");
@@ -37,12 +41,42 @@ pub async fn load_mysql_schema(pool: &MySqlPool) -> Result<Vec<SchemaNode>, Stri
             },
         };
 
-        schemas.entry(schema_name).or_default().push(node);
+        let db_entry = databases.entry(schema_name.clone()).or_default();
+        let schema_entry = db_entry.entry(schema_name).or_default();
+        match node {
+            SchemaNode::View { .. } => schema_entry.1.push(node),
+            _ => schema_entry.0.push(node),
+        }
     }
 
-    let tree: Vec<SchemaNode> = schemas
+    let tree: Vec<SchemaNode> = databases
         .into_iter()
-        .map(|(name, children)| SchemaNode::Schema { name, expanded: false, children })
+        .map(|(db_name, schemas)| {
+            let schema_nodes: Vec<SchemaNode> = schemas
+                .into_iter()
+                .map(|(schema_name, (tables, views))| {
+                    let mut children = Vec::new();
+                    if !tables.is_empty() {
+                        children.push(SchemaNode::ObjectFolder {
+                            kind: FolderKind::Tables,
+                            expanded: false,
+                            loaded: true,
+                            children: tables,
+                        });
+                    }
+                    if !views.is_empty() {
+                        children.push(SchemaNode::ObjectFolder {
+                            kind: FolderKind::Views,
+                            expanded: false,
+                            loaded: true,
+                            children: views,
+                        });
+                    }
+                    SchemaNode::Schema { name: schema_name, expanded: false, children }
+                })
+                .collect();
+            SchemaNode::Database { name: db_name, expanded: false, children: schema_nodes }
+        })
         .collect();
 
     Ok(tree)
@@ -86,6 +120,103 @@ pub async fn load_mysql_columns(
         .collect();
 
     Ok(columns)
+}
+
+pub async fn load_mysql_table_details(
+    pool: &MySqlPool,
+    schema: &str,
+    table: &str,
+) -> Result<TableDetails, String> {
+    let columns = load_mysql_columns(pool, schema, table).await?;
+
+    let pk_rows = sqlx::query(
+        "SELECT COLUMN_NAME
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME = 'PRIMARY'
+         ORDER BY SEQ_IN_INDEX",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("MySQL PK query: {e}"))?;
+
+    let pk_columns: Vec<String> =
+        pk_rows.iter().map(|row| row.get::<String, _>("COLUMN_NAME")).collect();
+    let keys = if pk_columns.is_empty() {
+        Vec::new()
+    } else {
+        vec![KeyInfo { name: "PRIMARY".to_string(), columns: pk_columns }]
+    };
+
+    let fk_rows = sqlx::query(
+        "SELECT ku.CONSTRAINT_NAME, ku.COLUMN_NAME,
+                ku.REFERENCED_TABLE_NAME, ku.REFERENCED_COLUMN_NAME
+         FROM information_schema.KEY_COLUMN_USAGE ku
+         JOIN information_schema.REFERENTIAL_CONSTRAINTS rc
+             ON ku.CONSTRAINT_NAME = rc.CONSTRAINT_NAME
+             AND ku.TABLE_SCHEMA = rc.CONSTRAINT_SCHEMA
+         WHERE ku.TABLE_SCHEMA = ? AND ku.TABLE_NAME = ?
+             AND ku.REFERENCED_TABLE_NAME IS NOT NULL
+         ORDER BY ku.CONSTRAINT_NAME, ku.ORDINAL_POSITION",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("MySQL FK query: {e}"))?;
+
+    let mut fk_map: BTreeMap<String, (Vec<String>, String, Vec<String>)> = BTreeMap::new();
+    for row in &fk_rows {
+        let name: String = row.get("CONSTRAINT_NAME");
+        let col: String = row.get("COLUMN_NAME");
+        let ref_table: String = row.get("REFERENCED_TABLE_NAME");
+        let ref_col: String = row.get("REFERENCED_COLUMN_NAME");
+        let entry = fk_map.entry(name).or_insert_with(|| (Vec::new(), ref_table, Vec::new()));
+        entry.0.push(col);
+        entry.2.push(ref_col);
+    }
+    let foreign_keys: Vec<ForeignKeyInfo> = fk_map
+        .into_iter()
+        .map(|(name, (columns, ref_table, ref_columns))| ForeignKeyInfo {
+            name,
+            columns,
+            ref_table,
+            ref_columns,
+        })
+        .collect();
+
+    let idx_rows = sqlx::query(
+        "SELECT INDEX_NAME, NON_UNIQUE, COLUMN_NAME
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND INDEX_NAME != 'PRIMARY'
+         ORDER BY INDEX_NAME, SEQ_IN_INDEX",
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| format!("MySQL index query: {e}"))?;
+
+    let mut idx_map: BTreeMap<String, (bool, Vec<String>)> = BTreeMap::new();
+    for row in &idx_rows {
+        let name: String = row.get("INDEX_NAME");
+        let non_unique: bool = row.get("NON_UNIQUE");
+        let col: String = row.get("COLUMN_NAME");
+        let entry = idx_map.entry(name).or_insert_with(|| (!non_unique, Vec::new()));
+        entry.1.push(col);
+    }
+    let indexes: Vec<IndexInfo> = idx_map
+        .into_iter()
+        .map(|(name, (is_unique, columns))| IndexInfo {
+            name,
+            columns,
+            is_unique,
+            is_primary: false,
+        })
+        .collect();
+
+    Ok(TableDetails { columns, keys, foreign_keys, indexes })
 }
 
 pub async fn load_mysql_table_info(

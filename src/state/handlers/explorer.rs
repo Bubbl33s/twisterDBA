@@ -80,7 +80,7 @@ impl super::super::AppState {
                         if let Some(ref conn_name) = self.active_connection.clone() {
                             self.explorer.set_loading_child(conn_name, &schema, &table);
                             if let Some(tx) = self.db_tx.clone() {
-                                let _ = tx.send(DbCommand::LoadColumns {
+                                let _ = tx.send(DbCommand::LoadTableDetails {
                                     connection_name: conn_name.clone(),
                                     schema: schema.clone(),
                                     table: table.clone(),
@@ -88,6 +88,13 @@ impl super::super::AppState {
                             }
                         }
                     }
+                }
+            },
+            Some(NodeKind::Database) | Some(NodeKind::Folder) => {
+                if self.explorer.node_expanded_at(idx) {
+                    self.explorer.collapse_node(idx);
+                } else {
+                    self.explorer.expand_node(idx);
                 }
             },
             _ => {},

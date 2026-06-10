@@ -69,6 +69,10 @@ pub struct IconMap {
     pub postgres: (char, Color),
     pub mysql: (char, Color),
     pub sqlite: (char, Color),
+    pub folder: (char, Color),
+    pub key: (char, Color),
+    pub foreign_key: (char, Color),
+    pub index: (char, Color),
 }
 
 impl IconMap {
@@ -83,6 +87,10 @@ impl IconMap {
             postgres: ('\u{F06FC}', Color::Rgb(77, 182, 172)),
             mysql: ('\u{F07C0}', Color::Rgb(84, 138, 247)),
             sqlite: ('\u{F021A}', Color::Rgb(169, 183, 198)),
+            folder: ('\u{F0248}', Color::Rgb(255, 203, 107)),
+            key: ('\u{F093D}', Color::Rgb(255, 203, 107)),
+            foreign_key: ('\u{F0337}', Color::Rgb(229, 155, 90)),
+            index: ('\u{F018A}', Color::Rgb(84, 138, 247)),
         }
     }
 }

@@ -14,6 +14,36 @@ pub struct ColumnInfo {
 }
 
 #[derive(Debug, Clone)]
+pub struct KeyInfo {
+    pub name: String,
+    pub columns: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForeignKeyInfo {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub ref_table: String,
+    pub ref_columns: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct IndexInfo {
+    pub name: String,
+    pub columns: Vec<String>,
+    pub is_unique: bool,
+    pub is_primary: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct TableDetails {
+    pub columns: Vec<ColumnInfo>,
+    pub keys: Vec<KeyInfo>,
+    pub foreign_keys: Vec<ForeignKeyInfo>,
+    pub indexes: Vec<IndexInfo>,
+}
+
+#[derive(Debug, Clone)]
 pub struct TableInfo {
     pub ddl: Option<String>,
     pub row_count: Option<u64>,
@@ -42,6 +72,12 @@ pub enum DbEvent {
         schema: String,
         table: String,
         columns: Vec<ColumnInfo>,
+    },
+    TableDetailsLoaded {
+        connection_name: String,
+        schema: String,
+        table: String,
+        details: TableDetails,
     },
     TableInfoLoaded {
         connection_name: String,

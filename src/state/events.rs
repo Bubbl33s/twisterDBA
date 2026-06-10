@@ -148,6 +148,9 @@ impl AppState {
                     .collect();
                 self.explorer.insert_columns(connection_name, schema, table, column_nodes);
             },
+            DbEvent::TableDetailsLoaded { connection_name, schema, table, details } => {
+                self.explorer.insert_table_details(connection_name, schema, table, details.clone());
+            },
             DbEvent::QueryStarted { .. } => {
                 let is_page_fetch = {
                     let editor = self.focused_editor();

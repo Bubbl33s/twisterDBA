@@ -3,6 +3,7 @@ use std::time::Instant;
 use ratatui::style::Color;
 
 use crate::db::backend::EngineType;
+use crate::events::TableDetails;
 use crate::state::ConnectionStatus;
 use crate::theme::IconMap;
 
@@ -13,6 +14,34 @@ pub enum SchemaNode {
     View { schema: String, name: String },
     Column { name: String, data_type: String, nullable: bool, is_primary_key: bool },
     Loading { schema: String, table: String },
+    Database { name: String, expanded: bool, children: Vec<SchemaNode> },
+    ObjectFolder { kind: FolderKind, expanded: bool, loaded: bool, children: Vec<SchemaNode> },
+    Index { name: String, columns: Vec<String>, is_unique: bool, is_primary: bool },
+    ForeignKey { name: String, columns: Vec<String>, ref_table: String, ref_columns: Vec<String> },
+    Key { name: String, columns: Vec<String> },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FolderKind {
+    Tables,
+    Views,
+    Columns,
+    Keys,
+    ForeignKeys,
+    Indexes,
+}
+
+impl FolderKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            FolderKind::Tables => "tables",
+            FolderKind::Views => "views",
+            FolderKind::Columns => "columns",
+            FolderKind::Keys => "keys",
+            FolderKind::ForeignKeys => "foreign_keys",
+            FolderKind::Indexes => "indexes",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,6 +52,11 @@ pub enum NodeKind {
     View,
     Column,
     Loading,
+    Database,
+    Folder,
+    Index,
+    ForeignKey,
+    Key,
 }
 
 #[derive(Debug, Clone)]
@@ -52,6 +86,13 @@ pub struct FlatNode {
     pub loaded: bool,
     pub expandable: bool,
     pub icon: Option<(char, Color)>,
+    #[allow(dead_code)]
+    pub folder_kind: Option<FolderKind>,
+    pub columns: Option<Vec<String>>,
+    pub ref_table: Option<String>,
+    pub ref_columns: Option<Vec<String>>,
+    pub is_unique: bool,
+    pub child_count: usize,
 }
 
 enum NodePath {
@@ -149,6 +190,12 @@ impl SchemaExplorer {
                 loaded: true,
                 expandable: true,
                 icon: Some(engine_icon),
+                folder_kind: None,
+                columns: None,
+                ref_table: None,
+                ref_columns: None,
+                is_unique: false,
+                child_count: 0,
             });
             if source.expanded {
                 Self::flatten(&source.tree, 1, &mut all_nodes, &self.icons);
@@ -184,6 +231,12 @@ impl SchemaExplorer {
                         loaded: true,
                         expandable: true,
                         icon: Some(icons.schema),
+                        folder_kind: None,
+                        columns: None,
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: false,
+                        child_count: children.len(),
                     });
                     if *expanded {
                         Self::flatten(children, depth + 1, output, icons);
@@ -204,6 +257,12 @@ impl SchemaExplorer {
                         loaded: *loaded,
                         expandable: true,
                         icon: Some(icons.table),
+                        folder_kind: None,
+                        columns: None,
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: false,
+                        child_count: children.len(),
                     });
                     if *expanded {
                         Self::flatten(children, depth + 1, output, icons);
@@ -224,6 +283,12 @@ impl SchemaExplorer {
                         loaded: true,
                         expandable: false,
                         icon: Some(icons.view),
+                        folder_kind: None,
+                        columns: None,
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: false,
+                        child_count: 0,
                     });
                 },
                 SchemaNode::Column { name, data_type, nullable, is_primary_key } => {
@@ -241,6 +306,12 @@ impl SchemaExplorer {
                         loaded: true,
                         expandable: false,
                         icon: Some(icons.column),
+                        folder_kind: None,
+                        columns: None,
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: false,
+                        child_count: 0,
                     });
                 },
                 SchemaNode::Loading { schema, table } => {
@@ -258,6 +329,133 @@ impl SchemaExplorer {
                         loaded: false,
                         expandable: false,
                         icon: None,
+                        folder_kind: None,
+                        columns: None,
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: false,
+                        child_count: 0,
+                    });
+                },
+                SchemaNode::Database { name, expanded, children } => {
+                    output.push(FlatNode {
+                        depth,
+                        kind: NodeKind::Database,
+                        name: name.clone(),
+                        source_name: None,
+                        schema: None,
+                        table: None,
+                        data_type: None,
+                        nullable: false,
+                        is_primary_key: false,
+                        expanded: *expanded,
+                        loaded: true,
+                        expandable: true,
+                        icon: Some(icons.database),
+                        folder_kind: None,
+                        columns: None,
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: false,
+                        child_count: children.len(),
+                    });
+                    if *expanded {
+                        Self::flatten(children, depth + 1, output, icons);
+                    }
+                },
+                SchemaNode::ObjectFolder { kind, expanded, loaded, children } => {
+                    output.push(FlatNode {
+                        depth,
+                        kind: NodeKind::Folder,
+                        name: kind.label().to_string(),
+                        source_name: None,
+                        schema: None,
+                        table: None,
+                        data_type: None,
+                        nullable: false,
+                        is_primary_key: false,
+                        expanded: *expanded,
+                        loaded: *loaded,
+                        expandable: true,
+                        icon: Some(icons.folder),
+                        folder_kind: Some(kind.clone()),
+                        columns: None,
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: false,
+                        child_count: children.len(),
+                    });
+                    if *expanded {
+                        Self::flatten(children, depth + 1, output, icons);
+                    }
+                },
+                SchemaNode::Index { name, columns, is_unique, is_primary } => {
+                    output.push(FlatNode {
+                        depth,
+                        kind: NodeKind::Index,
+                        name: name.clone(),
+                        source_name: None,
+                        schema: None,
+                        table: None,
+                        data_type: None,
+                        nullable: false,
+                        is_primary_key: *is_primary,
+                        expanded: false,
+                        loaded: true,
+                        expandable: false,
+                        icon: Some(icons.index),
+                        folder_kind: None,
+                        columns: Some(columns.clone()),
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: *is_unique,
+                        child_count: 0,
+                    });
+                },
+                SchemaNode::ForeignKey { name, columns, ref_table, ref_columns } => {
+                    output.push(FlatNode {
+                        depth,
+                        kind: NodeKind::ForeignKey,
+                        name: name.clone(),
+                        source_name: None,
+                        schema: None,
+                        table: None,
+                        data_type: None,
+                        nullable: false,
+                        is_primary_key: false,
+                        expanded: false,
+                        loaded: true,
+                        expandable: false,
+                        icon: Some(icons.foreign_key),
+                        folder_kind: None,
+                        columns: Some(columns.clone()),
+                        ref_table: Some(ref_table.clone()),
+                        ref_columns: Some(ref_columns.clone()),
+                        is_unique: false,
+                        child_count: 0,
+                    });
+                },
+                SchemaNode::Key { name, columns } => {
+                    output.push(FlatNode {
+                        depth,
+                        kind: NodeKind::Key,
+                        name: name.clone(),
+                        source_name: None,
+                        schema: None,
+                        table: None,
+                        data_type: None,
+                        nullable: false,
+                        is_primary_key: true,
+                        expanded: false,
+                        loaded: true,
+                        expandable: false,
+                        icon: Some(icons.key),
+                        folder_kind: None,
+                        columns: Some(columns.clone()),
+                        ref_table: None,
+                        ref_columns: None,
+                        is_unique: false,
+                        child_count: 0,
                     });
                 },
             }
@@ -289,6 +487,8 @@ impl SchemaExplorer {
                     match target {
                         SchemaNode::Schema { expanded, .. } => *expanded = true,
                         SchemaNode::Table { expanded, .. } => *expanded = true,
+                        SchemaNode::Database { expanded, .. } => *expanded = true,
+                        SchemaNode::ObjectFolder { expanded, .. } => *expanded = true,
                         _ => {},
                     }
                 }
@@ -317,6 +517,13 @@ impl SchemaExplorer {
                         SchemaNode::Table { expanded, .. } => {
                             *expanded = false;
                         },
+                        SchemaNode::Database { expanded, children, .. } => {
+                            *expanded = false;
+                            Self::collapse_recursive(children);
+                        },
+                        SchemaNode::ObjectFolder { expanded, .. } => {
+                            *expanded = false;
+                        },
                         _ => {},
                     }
                 }
@@ -334,6 +541,13 @@ impl SchemaExplorer {
                     Self::collapse_recursive(children);
                 },
                 SchemaNode::Table { expanded, .. } => {
+                    *expanded = false;
+                },
+                SchemaNode::Database { expanded, children, .. } => {
+                    *expanded = false;
+                    Self::collapse_recursive(children);
+                },
+                SchemaNode::ObjectFolder { expanded, .. } => {
                     *expanded = false;
                 },
                 _ => {},
@@ -389,6 +603,23 @@ impl SchemaExplorer {
                     path.pop();
                 },
                 SchemaNode::Table { .. } => {},
+                SchemaNode::Database { expanded, children, .. } => {
+                    if *expanded {
+                        path.push(i);
+                        if Self::build_path(children, target_idx, count, path) {
+                            return true;
+                        }
+                        path.pop();
+                    }
+                },
+                SchemaNode::ObjectFolder { expanded: true, children, .. } => {
+                    path.push(i);
+                    if Self::build_path(children, target_idx, count, path) {
+                        return true;
+                    }
+                    path.pop();
+                },
+                SchemaNode::ObjectFolder { .. } => {},
                 _ => {},
             }
         }
@@ -428,7 +659,17 @@ impl SchemaExplorer {
                         return true;
                     }
                 },
+                SchemaNode::Database { children, .. } => {
+                    if Self::insert_columns_into(children, schema, table, columns.clone()) {
+                        return true;
+                    }
+                },
                 SchemaNode::Table { children, .. } => {
+                    if Self::insert_columns_into(children, schema, table, columns.clone()) {
+                        return true;
+                    }
+                },
+                SchemaNode::ObjectFolder { children, .. } => {
                     if Self::insert_columns_into(children, schema, table, columns.clone()) {
                         return true;
                     }
@@ -463,7 +704,17 @@ impl SchemaExplorer {
                         return true;
                     }
                 },
+                SchemaNode::Database { children, .. } => {
+                    if Self::set_loading_in(children, schema, table) {
+                        return true;
+                    }
+                },
                 SchemaNode::Table { children, .. } => {
+                    if Self::set_loading_in(children, schema, table) {
+                        return true;
+                    }
+                },
+                SchemaNode::ObjectFolder { children, .. } => {
                     if Self::set_loading_in(children, schema, table) {
                         return true;
                     }
@@ -514,9 +765,143 @@ impl SchemaExplorer {
             match node {
                 SchemaNode::Schema { children, .. } => Self::get_node_mut(children, &path[1..]),
                 SchemaNode::Table { children, .. } => Self::get_node_mut(children, &path[1..]),
+                SchemaNode::Database { children, .. } => Self::get_node_mut(children, &path[1..]),
+                SchemaNode::ObjectFolder { children, .. } => {
+                    Self::get_node_mut(children, &path[1..])
+                },
                 _ => None,
             }
         }
+    }
+
+    pub fn insert_table_details(
+        &mut self,
+        source_name: &str,
+        schema: &str,
+        table: &str,
+        details: TableDetails,
+    ) {
+        if let Some(source) = self.sources.iter_mut().find(|s| s.name == source_name) {
+            Self::insert_table_details_into(&mut source.tree, schema, table, details);
+            self.rebuild_flat_view();
+        }
+    }
+
+    fn insert_table_details_into(
+        nodes: &mut [SchemaNode],
+        schema: &str,
+        table: &str,
+        details: TableDetails,
+    ) -> bool {
+        for node in nodes.iter_mut() {
+            match node {
+                SchemaNode::Table { schema: s, name: t, loaded, children, .. }
+                    if s == schema && t == table =>
+                {
+                    *loaded = true;
+                    let mut folders = Vec::new();
+
+                    let column_nodes: Vec<SchemaNode> = details
+                        .columns
+                        .iter()
+                        .map(|c| SchemaNode::Column {
+                            name: c.name.clone(),
+                            data_type: c.data_type.clone(),
+                            nullable: c.nullable,
+                            is_primary_key: c.is_primary_key,
+                        })
+                        .collect();
+                    if !column_nodes.is_empty() {
+                        folders.push(SchemaNode::ObjectFolder {
+                            kind: FolderKind::Columns,
+                            expanded: false,
+                            loaded: true,
+                            children: column_nodes,
+                        });
+                    }
+
+                    let key_nodes: Vec<SchemaNode> = details
+                        .keys
+                        .iter()
+                        .map(|k| SchemaNode::Key {
+                            name: k.name.clone(),
+                            columns: k.columns.clone(),
+                        })
+                        .collect();
+                    if !key_nodes.is_empty() {
+                        folders.push(SchemaNode::ObjectFolder {
+                            kind: FolderKind::Keys,
+                            expanded: false,
+                            loaded: true,
+                            children: key_nodes,
+                        });
+                    }
+
+                    let fk_nodes: Vec<SchemaNode> = details
+                        .foreign_keys
+                        .iter()
+                        .map(|fk| SchemaNode::ForeignKey {
+                            name: fk.name.clone(),
+                            columns: fk.columns.clone(),
+                            ref_table: fk.ref_table.clone(),
+                            ref_columns: fk.ref_columns.clone(),
+                        })
+                        .collect();
+                    if !fk_nodes.is_empty() {
+                        folders.push(SchemaNode::ObjectFolder {
+                            kind: FolderKind::ForeignKeys,
+                            expanded: false,
+                            loaded: true,
+                            children: fk_nodes,
+                        });
+                    }
+
+                    let index_nodes: Vec<SchemaNode> = details
+                        .indexes
+                        .iter()
+                        .map(|idx| SchemaNode::Index {
+                            name: idx.name.clone(),
+                            columns: idx.columns.clone(),
+                            is_unique: idx.is_unique,
+                            is_primary: idx.is_primary,
+                        })
+                        .collect();
+                    if !index_nodes.is_empty() {
+                        folders.push(SchemaNode::ObjectFolder {
+                            kind: FolderKind::Indexes,
+                            expanded: false,
+                            loaded: true,
+                            children: index_nodes,
+                        });
+                    }
+
+                    *children = folders;
+                    return true;
+                },
+                SchemaNode::Schema { children, .. } => {
+                    if Self::insert_table_details_into(children, schema, table, details.clone()) {
+                        return true;
+                    }
+                },
+                SchemaNode::Database { children, .. } => {
+                    if Self::insert_table_details_into(children, schema, table, details.clone()) {
+                        return true;
+                    }
+                },
+                SchemaNode::ObjectFolder { children, .. } => {
+                    if Self::insert_table_details_into(children, schema, table, details.clone()) {
+                        return true;
+                    }
+                },
+                SchemaNode::Table { children, .. } => {
+                    if Self::insert_table_details_into(children, schema, table, details.clone()) {
+                        return true;
+                    }
+                },
+                _ => {},
+            }
+        }
+        false
     }
 
     pub fn apply_search(&mut self) {
