@@ -1,0 +1,49 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Rust edition 2024, Ratatui 0.30, Crossterm 0.29, SQLx 0.9,
+              Tokio 1.52, PostgreSQL
+  Architecture: The Elm Architecture (TEA) with FSM modal (Normal/Insert/
+                Command/Visual/ConnectDialog). AppState owns all state
+                exclusively; DB layer communicates via mpsc::unbounded_channel.
+                Async DB operations run in Tokio tasks, never in render loop.
+  Product: twisterDBA — terminal-based PostgreSQL database admin tool with
+           vim-like keybindings, schema explorer, SQL editor, virtual result grid.
+  Language: All artifacts in English. Code, comments, docs, specs, commits.
+  Project spec source: project description document (detailed tasks per phase)
+  Logging: tracing to /tmp/dbterm.log, never stdout
+  Build/test: cargo build, cargo test, cargo clippy, cargo fmt --check
+
+  For all implementation: read mvp-terminal-db-admin.md for domain context.
+  Design decisions follow TEA principles: render is a pure function of state.
+  DB layer is fully async, decoupled from UI via message passing.
+
+rules:
+  _global:
+    - Before creating any artifact, read mvp-terminal-db-admin.md for domain context
+    - All specs and tasks must reference the specific Rust module they affect
+
+  spec:
+    - Requirements MUST describe user-observable terminal behavior
+    - Every requirement needs ≥1 scenario using #### Scenario: with WHEN/THEN format
+    - 'Consider edge cases: terminal resize, Unicode handling, connection loss,
+      query cancellation, large result sets'
+    - Prefer Rust enums over strings for state/mode definitions in design docs
+
+  tasks:
+    - Maximum 2 hours per task; atomic and independently verifiable
+    - Group tasks under ## numbered headings by architectural layer
+    - 'Task format: `- [ ] X.Y Short actionable description`'
+    - 'Every task group must include:
+      - cargo build verification
+      - cargo clippy pass
+      - cargo fmt --check'
+    - DB-related tasks: verify with actual PostgreSQL connection
+    - UI-related tasks: verify with manual terminal interaction
+
+  design:
+    - Document ADRs (Architecture Decision Records) for key decisions
+    - Ownership: AppState exclusively owned by main thread, never shared
+    - Async pattern: mpsc::unbounded_channel for DB communication
+    - UI pattern: render is pure function of state, immutable per frame
+    - Error handling: anyhow for ergonomic errors, tracing for logging

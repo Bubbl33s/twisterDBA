@@ -1,0 +1,108 @@
+name: twister-sdd
+version: 1
+description: TUI-driven spec workflow — proposal → specs → design → tasks, with TEA architecture focus
+artifacts:
+  - id: proposal
+    generates: proposal.md
+    description: Initial proposal document outlining the TUI change
+    template: proposal.md
+    instruction: >
+      Create the proposal document for a twisterDBA change.
+
+      Sections:
+      - **Why**: 1-2 sentences on the problem or opportunity. What user need
+      does this address in the terminal admin tool?
+      - **What Changes**: Bullet list of changes to the TUI, state machine,
+      DB layer, or configuration. Mark breaking changes with **BREAKING**.
+      - **Capabilities**: Identify which specs will be created or modified:
+        - **New Capabilities**: New spec domains (e.g., status-bar, sql-export).
+        Use kebab-case names. Check openspec/specs/ for existing names.
+        - **Modified Capabilities**: Existing specs whose behavior changes.
+      - **Impact**: Affected Rust modules (src/ files), architecture layers,
+      external dependencies, PostgreSQL interactions.
+
+      Keep it concise. Focus on the "why" — implementation in design.md.
+    requires: []
+  - id: specs
+    generates: specs/**/*.md
+    description: Detailed specifications for the TUI change
+    template: spec.md
+    instruction: >
+      Create specification files that define WHAT the terminal user observes.
+
+      Create one spec file per capability listed in the proposal.
+
+      Delta operations (use ## headers):
+      - **ADDED Requirements**: New capabilities for the TUI
+      - **MODIFIED Requirements**: Changed terminal behavior — include FULL updated content
+      - **REMOVED Requirements**: Deprecated features with **Reason** and **Migration**
+      - **RENAMED Requirements**: Name changes only — use FROM:/TO: format
+
+      Format:
+      - Each requirement: `### Requirement: <name>` followed by description
+      - Use SHALL/MUST for normative requirements
+      - Each scenario: `#### Scenario: <name>` with WHEN/THEN format
+      - **CRITICAL**: Scenarios MUST use exactly 4 hashtags (`####`)
+      - Every requirement MUST have at least one scenario
+      - Edge cases to consider: terminal resize, Unicode, connection drops,
+        query cancellation, large result sets, CJK characters
+    requires:
+      - proposal
+  - id: design
+    generates: design.md
+    description: Technical design document for the TUI change
+    template: design.md
+    instruction: >
+      Create the design document explaining HOW to implement in Rust.
+
+      Create only if any apply:
+      - Cross-cutting change (multiple Rust modules) or new pattern
+      - New external dependency or significant schema changes
+      - Concurrency, performance, or Unicode complexity
+      - Ambiguity around TEA state management
+
+      Sections:
+      - **Context**: Current architecture, constraints, stakeholders
+      - **Goals / Non-Goals**: What this design achieves and excludes
+      - **Decisions**: Key Rust/TUI choices with rationale (enums vs strings,
+        channels vs locks, pure render functions). Include alternatives considered.
+      - **Risks / Trade-offs**: Known limitations, format: [Risk] → Mitigation
+      - **Migration Plan**: Steps to deploy, rollback (if applicable)
+      - **Open Questions**: Outstanding decisions
+
+      Focus on Rust architecture, async patterns, and TEA state management.
+    requires:
+      - proposal
+  - id: tasks
+    generates: tasks.md
+    description: Implementation checklist with trackable Rust tasks
+    template: tasks.md
+    instruction: >
+      Create the task list breaking down Rust implementation work.
+
+      Guidelines:
+      - Group under ## numbered headings by architectural layer
+      - Each task: `- [ ] X.Y Actionable description`
+      - Max 2 hours per task — split if needed
+      - Order by dependency (build order, module dependencies)
+      - Reference specific src/ file paths and Rust modules
+
+      Each task group must include verification steps:
+      - cargo build verification
+      - cargo clippy pass
+      - cargo fmt --check
+      - For DB tasks: PostgreSQL manual verification
+      - For UI tasks: manual terminal interaction test
+
+      Reference specs for what to build, design for how.
+    requires:
+      - specs
+      - design
+apply:
+  requires:
+    - tasks
+  tracks: tasks.md
+  instruction: |
+    Read context files (proposal, specs, design, tasks). Work through pending
+    tasks. For each: implement in Rust, cargo check, mark [x]. Pause if blocked
+    or unclear. Cargo build + clippy + test must pass before marking complete.
