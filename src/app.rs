@@ -26,11 +26,11 @@ impl App {
         state.db_tx = Some(db_tx.clone());
 
         if let Ok(Some(session)) = load_session_from_disk() {
-            let saved_connections = session.saved_connections.clone();
+            let saved_sources = session.saved_sources.clone();
             let active_connection = session.active_connection.clone();
             state.apply_session_data(session);
 
-            for profile_name in &saved_connections {
+            for profile_name in &saved_sources {
                 if let Some(profile) =
                     state.config.connections.iter().find(|p| p.name == *profile_name)
                 {

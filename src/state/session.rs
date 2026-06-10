@@ -18,7 +18,7 @@ pub struct BufferSnapshot {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
     pub active_connection: Option<String>,
-    pub saved_connections: Vec<String>,
+    pub saved_sources: Vec<String>,
     pub buffers: Vec<BufferSnapshot>,
     pub focused_buffer: usize,
     pub focused_panel: String,
@@ -27,11 +27,12 @@ pub struct SessionData {
 
 impl AppState {
     pub fn to_session_data(&self) -> SessionData {
-        let saved_connections: Vec<String> = self
-            .connections
+        let saved_sources: Vec<String> = self
+            .explorer
+            .sources
             .iter()
-            .filter(|c| matches!(c.status, super::connection::ConnectionStatus::Connected { .. }))
-            .map(|c| c.name.clone())
+            .filter(|s| matches!(s.status, super::connection::ConnectionStatus::Connected { .. }))
+            .map(|s| s.name.clone())
             .collect();
         let buffers: Vec<BufferSnapshot> = self
             .editor_splits
@@ -58,7 +59,7 @@ impl AppState {
         };
         SessionData {
             active_connection: self.active_connection.clone(),
-            saved_connections,
+            saved_sources,
             buffers,
             focused_buffer: self.active_split,
             focused_panel: focused_window,

@@ -124,29 +124,70 @@ fn render_connection_status(state: &AppState) -> Line<'static> {
         ));
     }
 
-    match state.active_connection_entry() {
-        None => Line::from(Span::styled("○ Disconnected", Style::default().fg(Color::Gray))),
-        Some(entry) => {
+    let source_count = state.explorer.sources.len();
+    let connected_count = state
+        .explorer
+        .sources
+        .iter()
+        .filter(|s| matches!(s.status, crate::state::ConnectionStatus::Connected { .. }))
+        .count();
+
+    match state.active_source() {
+        None => {
+            if source_count > 1 {
+                Line::from(Span::styled(
+                    format!("{} connections", connected_count),
+                    Style::default().fg(Color::Gray),
+                ))
+            } else {
+                Line::from(Span::styled("○ Disconnected", Style::default().fg(Color::Gray)))
+            }
+        },
+        Some(source) => {
             use crate::state::ConnectionStatus;
-            match &entry.status {
+            let engine_prefix = match source.engine_type {
+                crate::db::backend::EngineType::Postgres => "PG",
+                crate::db::backend::EngineType::Mysql => "MY",
+                crate::db::backend::EngineType::Sqlite => "SQ",
+            };
+            let count_suffix = if connected_count > 1 {
+                format!(" (+{})", connected_count - 1)
+            } else {
+                String::new()
+            };
+            match &source.status {
                 ConnectionStatus::Connecting { .. } => {
                     let spinner = state.spinner_char();
                     Line::from(Span::styled(
-                        format!("{} Connecting...", spinner),
+                        format!("{} [{}] {}{}", spinner, engine_prefix, source.name, count_suffix),
                         Style::default().fg(Color::Yellow),
                     ))
                 },
-                ConnectionStatus::Connected { .. } => Line::from(Span::styled(
-                    format!("● {}", entry.name),
-                    Style::default().fg(Color::Green),
+                ConnectionStatus::Connected { .. } => Line::from(vec![
+                    Span::styled("●", Style::default().fg(Color::Green)),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("[{}]", engine_prefix),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(source.name.clone(), Style::default().fg(Color::Green)),
+                    Span::styled(count_suffix, Style::default().fg(Color::DarkGray)),
+                ]),
+                ConnectionStatus::Error(msg) => Line::from(Span::styled(
+                    format!("[{}] {} ✗ {}", engine_prefix, source.name, msg),
+                    Style::default().fg(Color::Red),
                 )),
-                ConnectionStatus::Error(msg) => {
-                    Line::from(Span::styled(format!("✗ {}", msg), Style::default().fg(Color::Red)))
-                },
-                ConnectionStatus::Disconnected => Line::from(Span::styled(
-                    format!("○ {}", entry.name),
-                    Style::default().fg(Color::Gray),
-                )),
+                ConnectionStatus::Disconnected => Line::from(vec![
+                    Span::styled("○", Style::default().fg(Color::Gray)),
+                    Span::raw(" "),
+                    Span::styled(
+                        format!("[{}]", engine_prefix),
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                    Span::raw(" "),
+                    Span::styled(source.name.clone(), Style::default().fg(Color::Gray)),
+                ]),
             }
         },
     }

@@ -7,10 +7,10 @@ use ratatui::{
 };
 
 use crate::explorer::{NodeKind, SchemaExplorer};
-use crate::state::{AppState, Window};
+use crate::state::{AppState, ConnectionStatus, Window};
 use crate::theme::Theme;
 
-pub fn render_schema_explorer(
+pub fn render_database_explorer(
     f: &mut Frame,
     area: Rect,
     state: &AppState,
@@ -24,11 +24,11 @@ pub fn render_schema_explorer(
         Style::default().bg(theme.statusline_inactive_bg)
     };
     let explorer_block = Block::default()
-        .title(Span::styled(" Schema Explorer ", title_style.add_modifier(Modifier::BOLD)))
+        .title(Span::styled(" Database Explorer ", title_style.add_modifier(Modifier::BOLD)))
         .style(Style::default().bg(theme.bg));
 
-    if explorer.all_flat_nodes.is_empty() {
-        f.render_widget(Paragraph::new(Text::from("(no schema)")).block(explorer_block), area);
+    if explorer.sources.is_empty() {
+        f.render_widget(Paragraph::new(Text::from("(no connections)")).block(explorer_block), area);
         return;
     }
 
@@ -47,11 +47,21 @@ pub fn render_schema_explorer(
             let indicator =
                 if node.expandable { if node.expanded { "▾ " } else { "▸ " } } else { "  " };
             let indicator_span = Span::styled(indicator, Style::default().fg(Color::DarkGray));
+
             let icon_span = if let Some((icon_char, icon_color)) = &node.icon {
                 if nerd_font_available {
                     Span::styled(format!("{} ", icon_char), Style::default().fg(*icon_color))
                 } else {
                     let ascii = match node.kind {
+                        NodeKind::Source => {
+                            let src = explorer.sources.iter().find(|s| s.name == node.name);
+                            match src.map(|s| s.engine_type) {
+                                Some(crate::db::backend::EngineType::Postgres) => "[PG] ",
+                                Some(crate::db::backend::EngineType::Mysql) => "[MY] ",
+                                Some(crate::db::backend::EngineType::Sqlite) => "[SQ] ",
+                                None => "[DB] ",
+                            }
+                        },
                         NodeKind::Schema => "[S] ",
                         NodeKind::Table => "[T] ",
                         NodeKind::View => "[V] ",
@@ -76,7 +86,16 @@ pub fn render_schema_explorer(
                 _ => node.name.clone(),
             };
 
-            let spans = vec![Span::raw(indent), indicator_span, icon_span, Span::raw(text)];
+            let mut spans = vec![Span::raw(indent), indicator_span, icon_span, Span::raw(text)];
+
+            if node.kind == NodeKind::Source
+                && let Some(source) = explorer.sources.iter().find(|s| s.name == node.name)
+            {
+                let status_span = render_status_indicator(&source.status, theme, state);
+                spans.push(Span::raw(" "));
+                spans.push(status_span);
+            }
+
             ListItem::new(Text::from(Line::from(spans)))
         })
         .collect();
@@ -94,4 +113,24 @@ pub fn render_schema_explorer(
         List::new(items).block(explorer_block).highlight_style(highlight_style).scroll_padding(2);
 
     f.render_stateful_widget(list, area, &mut list_state);
+}
+
+fn render_status_indicator(
+    status: &ConnectionStatus,
+    theme: &Theme,
+    state: &AppState,
+) -> Span<'static> {
+    match status {
+        ConnectionStatus::Connected { .. } => {
+            Span::styled("●", Style::default().fg(theme.status_connected))
+        },
+        ConnectionStatus::Connecting { .. } => {
+            let spinner = state.spinner_char();
+            Span::styled(spinner.to_string(), Style::default().fg(theme.status_connecting))
+        },
+        ConnectionStatus::Error(_) => Span::styled("✗", Style::default().fg(theme.status_error)),
+        ConnectionStatus::Disconnected => {
+            Span::styled("○", Style::default().fg(theme.status_disconnected))
+        },
+    }
 }

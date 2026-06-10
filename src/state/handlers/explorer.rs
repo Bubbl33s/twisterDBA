@@ -42,6 +42,22 @@ impl super::super::AppState {
         let idx = self.explorer.selected_idx;
         let kind = self.explorer.node_kind_at(idx);
         match kind {
+            Some(NodeKind::Source) => {
+                let source_name = self.explorer.node_source_name_at(idx);
+                if let Some(name) = source_name {
+                    if self.explorer.node_expanded_at(idx) {
+                        self.explorer.collapse_source(&name);
+                    } else {
+                        self.explorer.expand_source(&name);
+                        self.active_connection = Some(name.clone());
+                        let needs_load =
+                            self.explorer.source(&name).is_some_and(|s| s.tree.is_empty());
+                        if needs_load && let Some(tx) = self.db_tx.clone() {
+                            let _ = tx.send(DbCommand::LoadSchema { connection_name: name });
+                        }
+                    }
+                }
+            },
             Some(NodeKind::Schema) => {
                 if self.explorer.node_expanded_at(idx) {
                     self.explorer.collapse_node(idx);
@@ -61,15 +77,15 @@ impl super::super::AppState {
                     let table = self.explorer.node_table_at(idx);
                     if let (Some(schema), Some(table)) = (schema, table) {
                         self.explorer.expand_node(idx);
-                        self.explorer.set_loading_child(&schema, &table);
-                        if let Some(ref conn_name) = self.active_connection.clone()
-                            && let Some(tx) = self.db_tx.clone()
-                        {
-                            let _ = tx.send(DbCommand::LoadColumns {
-                                connection_name: conn_name.clone(),
-                                schema: schema.clone(),
-                                table: table.clone(),
-                            });
+                        if let Some(ref conn_name) = self.active_connection.clone() {
+                            self.explorer.set_loading_child(conn_name, &schema, &table);
+                            if let Some(tx) = self.db_tx.clone() {
+                                let _ = tx.send(DbCommand::LoadColumns {
+                                    connection_name: conn_name.clone(),
+                                    schema: schema.clone(),
+                                    table: table.clone(),
+                                });
+                            }
                         }
                     }
                 }

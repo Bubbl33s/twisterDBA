@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::db::client::DbCommand;
 use crate::editor::Direction;
 use crate::editor::SqlEditor;
-use crate::explorer::SchemaExplorer;
+use crate::explorer::{DbSource, SchemaExplorer};
 use crate::lua::LuaRuntime;
 use crate::result::ResultGrid;
 use crate::theme::Theme;
@@ -357,23 +357,24 @@ impl AppState {
         SPINNER_FRAMES[self.spinner_frame]
     }
 
-    pub fn active_connection_entry(&self) -> Option<&ConnectionEntry> {
-        let name = self.active_connection.as_ref()?;
-        self.connections.iter().find(|c| &c.name == name)
-    }
-
-    #[allow(dead_code)]
-    pub fn active_connection_entry_mut(&mut self) -> Option<&mut ConnectionEntry> {
-        let name = self.active_connection.clone()?;
-        self.connections.iter_mut().find(|c| c.name == name)
-    }
-
     pub fn connection_by_name(&self, name: &str) -> Option<&ConnectionEntry> {
         self.connections.iter().find(|c| c.name == name)
     }
 
     pub fn connection_by_name_mut(&mut self, name: &str) -> Option<&mut ConnectionEntry> {
         self.connections.iter_mut().find(|c| c.name == name)
+    }
+
+    pub fn active_source(&self) -> Option<&DbSource> {
+        let name = self.active_connection.as_ref()?;
+        self.explorer.sources.iter().find(|s| s.name == *name)
+    }
+
+    #[allow(dead_code)]
+    pub fn set_active_source(&mut self, name: &str) {
+        if self.explorer.sources.iter().any(|s| s.name == name) {
+            self.active_connection = Some(name.to_string());
+        }
     }
 }
 

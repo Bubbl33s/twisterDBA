@@ -2,6 +2,8 @@ use std::time::Instant;
 
 use ratatui::style::Color;
 
+use crate::db::backend::EngineType;
+use crate::state::ConnectionStatus;
 use crate::theme::IconMap;
 
 #[derive(Debug, Clone)]
@@ -15,6 +17,7 @@ pub enum SchemaNode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum NodeKind {
+    Source,
     Schema,
     Table,
     View,
@@ -23,10 +26,22 @@ pub enum NodeKind {
 }
 
 #[derive(Debug, Clone)]
+pub struct DbSource {
+    pub name: String,
+    pub engine_type: EngineType,
+    pub status: ConnectionStatus,
+    #[allow(dead_code)]
+    pub masked_dsn: String,
+    pub tree: Vec<SchemaNode>,
+    pub expanded: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct FlatNode {
     pub depth: usize,
     pub kind: NodeKind,
     pub name: String,
+    pub source_name: Option<String>,
     pub schema: Option<String>,
     pub table: Option<String>,
     pub data_type: Option<String>,
@@ -39,8 +54,13 @@ pub struct FlatNode {
     pub icon: Option<(char, Color)>,
 }
 
+enum NodePath {
+    Source(usize),
+    Tree(usize, Vec<usize>),
+}
+
 pub struct SchemaExplorer {
-    pub tree: Vec<SchemaNode>,
+    pub sources: Vec<DbSource>,
     pub flat_view: Vec<FlatNode>,
     pub selected_idx: usize,
     icons: IconMap,
@@ -53,7 +73,7 @@ pub struct SchemaExplorer {
 impl SchemaExplorer {
     pub fn new() -> Self {
         Self {
-            tree: Vec::new(),
+            sources: Vec::new(),
             flat_view: Vec::new(),
             selected_idx: 0,
             icons: IconMap::darcula(),
@@ -64,19 +84,86 @@ impl SchemaExplorer {
         }
     }
 
-    pub fn set_tree(&mut self, nodes: Vec<SchemaNode>) {
-        self.tree = nodes;
-        self.selected_idx = 0;
-        self.search_query.clear();
-        self.search_active = false;
+    pub fn add_source(&mut self, source: DbSource) {
+        if self.sources.iter().any(|s| s.name == source.name) {
+            return;
+        }
+        self.sources.push(source);
         self.rebuild_flat_view();
+    }
+
+    pub fn remove_source(&mut self, name: &str) {
+        self.sources.retain(|s| s.name != name);
+        self.rebuild_flat_view();
+    }
+
+    pub fn set_source_status(&mut self, name: &str, status: ConnectionStatus) {
+        if let Some(source) = self.sources.iter_mut().find(|s| s.name == name) {
+            source.status = status;
+            self.rebuild_flat_view();
+        }
+    }
+
+    pub fn expand_source(&mut self, name: &str) {
+        if let Some(source) = self.sources.iter_mut().find(|s| s.name == name) {
+            source.expanded = true;
+            self.rebuild_flat_view();
+        }
+    }
+
+    pub fn collapse_source(&mut self, name: &str) {
+        if let Some(source) = self.sources.iter_mut().find(|s| s.name == name) {
+            source.expanded = false;
+            self.rebuild_flat_view();
+        }
+    }
+
+    pub fn source(&self, name: &str) -> Option<&DbSource> {
+        self.sources.iter().find(|s| s.name == name)
+    }
+
+    pub fn set_tree_for_source(&mut self, name: &str, nodes: Vec<SchemaNode>) {
+        if let Some(source) = self.sources.iter_mut().find(|s| s.name == name) {
+            source.tree = nodes;
+            self.search_query.clear();
+            self.search_active = false;
+            self.rebuild_flat_view();
+        }
     }
 
     pub fn rebuild_flat_view(&mut self) {
         let mut all_nodes = Vec::new();
-        Self::flatten(&self.tree, 0, &mut all_nodes, &self.icons);
+        for source in &self.sources {
+            let engine_icon = self.engine_icon(source.engine_type);
+            all_nodes.push(FlatNode {
+                depth: 0,
+                kind: NodeKind::Source,
+                name: source.name.clone(),
+                source_name: Some(source.name.clone()),
+                schema: None,
+                table: None,
+                data_type: None,
+                nullable: false,
+                is_primary_key: false,
+                expanded: source.expanded,
+                loaded: true,
+                expandable: true,
+                icon: Some(engine_icon),
+            });
+            if source.expanded {
+                Self::flatten(&source.tree, 1, &mut all_nodes, &self.icons);
+            }
+        }
         self.all_flat_nodes = all_nodes;
         self.apply_search();
+    }
+
+    fn engine_icon(&self, engine_type: EngineType) -> (char, Color) {
+        match engine_type {
+            EngineType::Postgres => self.icons.postgres,
+            EngineType::Mysql => self.icons.mysql,
+            EngineType::Sqlite => self.icons.sqlite,
+        }
     }
 
     fn flatten(nodes: &[SchemaNode], depth: usize, output: &mut Vec<FlatNode>, icons: &IconMap) {
@@ -87,6 +174,7 @@ impl SchemaExplorer {
                         depth,
                         kind: NodeKind::Schema,
                         name: name.clone(),
+                        source_name: None,
                         schema: Some(name.clone()),
                         table: None,
                         data_type: None,
@@ -106,6 +194,7 @@ impl SchemaExplorer {
                         depth,
                         kind: NodeKind::Table,
                         name: name.clone(),
+                        source_name: None,
                         schema: Some(schema.clone()),
                         table: Some(name.clone()),
                         data_type: None,
@@ -125,6 +214,7 @@ impl SchemaExplorer {
                         depth,
                         kind: NodeKind::View,
                         name: name.clone(),
+                        source_name: None,
                         schema: Some(schema.clone()),
                         table: Some(name.clone()),
                         data_type: None,
@@ -141,6 +231,7 @@ impl SchemaExplorer {
                         depth,
                         kind: NodeKind::Column,
                         name: name.clone(),
+                        source_name: None,
                         schema: None,
                         table: None,
                         data_type: Some(data_type.clone()),
@@ -157,6 +248,7 @@ impl SchemaExplorer {
                         depth,
                         kind: NodeKind::Loading,
                         name: "...".into(),
+                        source_name: None,
                         schema: Some(schema.clone()),
                         table: Some(table.clone()),
                         data_type: None,
@@ -187,18 +279,21 @@ impl SchemaExplorer {
         if flat_idx >= self.flat_view.len() {
             return;
         }
-        let _node_info = &self.flat_view[flat_idx];
-        let path = self.path_to_node(flat_idx);
-        if let Some(target) = Self::get_node_mut(&mut self.tree, &path) {
-            match target {
-                SchemaNode::Schema { expanded, .. } => {
-                    *expanded = true;
-                },
-                SchemaNode::Table { expanded, .. } => {
-                    *expanded = true;
-                },
-                _ => {},
-            }
+        let node_path = self.resolve_node_path(flat_idx);
+        match node_path {
+            Some(NodePath::Source(src_idx)) => {
+                self.sources[src_idx].expanded = true;
+            },
+            Some(NodePath::Tree(src_idx, path)) => {
+                if let Some(target) = Self::get_node_mut(&mut self.sources[src_idx].tree, &path) {
+                    match target {
+                        SchemaNode::Schema { expanded, .. } => *expanded = true,
+                        SchemaNode::Table { expanded, .. } => *expanded = true,
+                        _ => {},
+                    }
+                }
+            },
+            None => {},
         }
         self.rebuild_flat_view();
     }
@@ -207,18 +302,26 @@ impl SchemaExplorer {
         if flat_idx >= self.flat_view.len() {
             return;
         }
-        let path = self.path_to_node(flat_idx);
-        if let Some(target) = Self::get_node_mut(&mut self.tree, &path) {
-            match target {
-                SchemaNode::Schema { expanded, children, .. } => {
-                    *expanded = false;
-                    Self::collapse_recursive(children);
-                },
-                SchemaNode::Table { expanded, .. } => {
-                    *expanded = false;
-                },
-                _ => {},
-            }
+        let node_path = self.resolve_node_path(flat_idx);
+        match node_path {
+            Some(NodePath::Source(src_idx)) => {
+                self.sources[src_idx].expanded = false;
+            },
+            Some(NodePath::Tree(src_idx, path)) => {
+                if let Some(target) = Self::get_node_mut(&mut self.sources[src_idx].tree, &path) {
+                    match target {
+                        SchemaNode::Schema { expanded, children, .. } => {
+                            *expanded = false;
+                            Self::collapse_recursive(children);
+                        },
+                        SchemaNode::Table { expanded, .. } => {
+                            *expanded = false;
+                        },
+                        _ => {},
+                    }
+                }
+            },
+            None => {},
         }
         self.rebuild_flat_view();
     }
@@ -238,11 +341,21 @@ impl SchemaExplorer {
         }
     }
 
-    fn path_to_node(&self, flat_idx: usize) -> Vec<usize> {
-        let mut path = Vec::new();
+    fn resolve_node_path(&self, flat_idx: usize) -> Option<NodePath> {
         let mut count = 0;
-        Self::build_path(&self.tree, flat_idx, &mut count, &mut path);
-        path
+        for (src_idx, source) in self.sources.iter().enumerate() {
+            if count == flat_idx {
+                return Some(NodePath::Source(src_idx));
+            }
+            count += 1;
+            if source.expanded {
+                let mut tree_path = Vec::new();
+                if Self::build_path(&source.tree, flat_idx, &mut count, &mut tree_path) {
+                    return Some(NodePath::Tree(src_idx, tree_path));
+                }
+            }
+        }
+        None
     }
 
     fn build_path(
@@ -282,9 +395,17 @@ impl SchemaExplorer {
         false
     }
 
-    pub fn insert_columns(&mut self, schema: &str, table: &str, columns: Vec<SchemaNode>) {
-        Self::insert_columns_into(&mut self.tree, schema, table, columns);
-        self.rebuild_flat_view();
+    pub fn insert_columns(
+        &mut self,
+        source_name: &str,
+        schema: &str,
+        table: &str,
+        columns: Vec<SchemaNode>,
+    ) {
+        if let Some(source) = self.sources.iter_mut().find(|s| s.name == source_name) {
+            Self::insert_columns_into(&mut source.tree, schema, table, columns);
+            self.rebuild_flat_view();
+        }
     }
 
     fn insert_columns_into(
@@ -318,9 +439,11 @@ impl SchemaExplorer {
         false
     }
 
-    pub fn set_loading_child(&mut self, schema: &str, table: &str) {
-        Self::set_loading_in(&mut self.tree, schema, table);
-        self.rebuild_flat_view();
+    pub fn set_loading_child(&mut self, source_name: &str, schema: &str, table: &str) {
+        if let Some(source) = self.sources.iter_mut().find(|s| s.name == source_name) {
+            Self::set_loading_in(&mut source.tree, schema, table);
+            self.rebuild_flat_view();
+        }
     }
 
     fn set_loading_in(nodes: &mut [SchemaNode], schema: &str, table: &str) -> bool {
@@ -373,6 +496,10 @@ impl SchemaExplorer {
 
     pub fn node_table_at(&self, flat_idx: usize) -> Option<String> {
         self.node_at(flat_idx).and_then(|n| n.table.clone())
+    }
+
+    pub fn node_source_name_at(&self, flat_idx: usize) -> Option<String> {
+        self.node_at(flat_idx).and_then(|n| n.source_name.clone())
     }
 
     fn get_node_mut<'a>(nodes: &'a mut [SchemaNode], path: &[usize]) -> Option<&'a mut SchemaNode> {

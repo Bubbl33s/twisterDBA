@@ -13,6 +13,10 @@ pub struct Theme {
     pub operator: Color,
     pub statusline_active_bg: Color,
     pub statusline_inactive_bg: Color,
+    pub status_connected: Color,
+    pub status_connecting: Color,
+    pub status_error: Color,
+    pub status_disconnected: Color,
     pub icons: IconMap,
     pub nerd_font_available: bool,
 }
@@ -39,6 +43,10 @@ impl Theme {
             operator: Color::Rgb(204, 120, 50),
             statusline_active_bg: Color::Rgb(58, 110, 165),
             statusline_inactive_bg: Color::Rgb(60, 63, 65),
+            status_connected: Color::Rgb(80, 200, 80),
+            status_connecting: Color::Rgb(230, 200, 50),
+            status_error: Color::Rgb(220, 60, 60),
+            status_disconnected: Color::Rgb(128, 128, 128),
             icons: IconMap::darcula(),
             nerd_font_available,
         }
@@ -54,6 +62,9 @@ pub struct IconMap {
     pub view: (char, Color),
     pub routine: (char, Color),
     pub column: (char, Color),
+    pub postgres: (char, Color),
+    pub mysql: (char, Color),
+    pub sqlite: (char, Color),
 }
 
 impl IconMap {
@@ -65,6 +76,9 @@ impl IconMap {
             view: ('\u{F0219}', Color::Rgb(186, 104, 200)),
             routine: ('\u{F0B21}', Color::Rgb(229, 115, 115)),
             column: ('\u{F071A}', Color::Rgb(169, 183, 198)),
+            postgres: ('\u{F06FC}', Color::Rgb(77, 182, 172)),
+            mysql: ('\u{F07C0}', Color::Rgb(84, 138, 247)),
+            sqlite: ('\u{F021A}', Color::Rgb(169, 183, 198)),
         }
     }
 }

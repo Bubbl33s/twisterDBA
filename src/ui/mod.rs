@@ -71,7 +71,7 @@ fn render_main_area(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) 
         ])
         .split(area);
 
-    explorer::render_schema_explorer(f, chunks[0], state, &state.explorer, theme);
+    explorer::render_database_explorer(f, chunks[0], state, &state.explorer, theme);
 
     let right_area = chunks[2];
     let right_chunks = Layout::default()

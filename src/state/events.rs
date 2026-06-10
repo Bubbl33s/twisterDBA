@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::db::backend::EngineType;
 use crate::db::client::DbCommand;
 use crate::events::DbEvent;
-use crate::explorer::SchemaNode;
+use crate::explorer::{DbSource, SchemaNode};
 use crate::state::{AppState, ConnectionEntry, ConnectionStatus, PopupState};
 
 fn timestamp() -> String {
@@ -19,19 +19,20 @@ impl AppState {
     pub fn apply_db_event(&mut self, event: &DbEvent) {
         match event {
             DbEvent::Connected { connection_name } => {
-                let (dsn, masked) = if let Some(entry) = self.connection_by_name(connection_name) {
-                    match &entry.status {
-                        ConnectionStatus::Connecting { dsn, masked } => {
-                            (dsn.clone(), masked.clone())
-                        },
-                        ConnectionStatus::Connected { dsn, masked } => {
-                            (dsn.clone(), masked.clone())
-                        },
-                        _ => (String::new(), entry.masked_dsn.clone()),
-                    }
-                } else {
-                    (String::new(), String::new())
-                };
+                let (dsn, masked, engine_type) =
+                    if let Some(entry) = self.connection_by_name(connection_name) {
+                        match &entry.status {
+                            ConnectionStatus::Connecting { dsn, masked } => {
+                                (dsn.clone(), masked.clone(), entry.engine_type)
+                            },
+                            ConnectionStatus::Connected { dsn, masked } => {
+                                (dsn.clone(), masked.clone(), entry.engine_type)
+                            },
+                            _ => (String::new(), entry.masked_dsn.clone(), entry.engine_type),
+                        }
+                    } else {
+                        (String::new(), String::new(), EngineType::Postgres)
+                    };
 
                 if let Some(entry) = self.connection_by_name_mut(connection_name) {
                     entry.status =
@@ -39,7 +40,7 @@ impl AppState {
                 } else {
                     self.connections.push(ConnectionEntry {
                         name: connection_name.clone(),
-                        engine_type: EngineType::Postgres,
+                        engine_type,
                         status: ConnectionStatus::Connected {
                             dsn: dsn.clone(),
                             masked: masked.clone(),
@@ -47,6 +48,18 @@ impl AppState {
                         masked_dsn: masked.clone(),
                     });
                 }
+
+                self.explorer.add_source(DbSource {
+                    name: connection_name.clone(),
+                    engine_type,
+                    status: ConnectionStatus::Connected {
+                        dsn: dsn.clone(),
+                        masked: masked.clone(),
+                    },
+                    masked_dsn: masked.clone(),
+                    tree: Vec::new(),
+                    expanded: false,
+                });
 
                 self.active_connection = Some(connection_name.clone());
 
@@ -97,6 +110,8 @@ impl AppState {
                         masked_dsn: String::new(),
                     });
                 }
+                self.explorer
+                    .set_source_status(connection_name, ConnectionStatus::Error(message.clone()));
                 let output = format!("[{}] Connection failed: {}", timestamp(), message);
                 self.output_results.output.push(output);
             },
@@ -104,9 +119,13 @@ impl AppState {
                 if let Some(entry) = self.connection_by_name_mut(connection_name) {
                     entry.status = ConnectionStatus::Disconnected;
                 }
+                self.explorer.remove_source(connection_name);
                 if self.active_connection.as_deref() == Some(connection_name) {
-                    self.active_connection = None;
-                    self.explorer = crate::explorer::SchemaExplorer::new();
+                    self.active_connection = self
+                        .connections
+                        .iter()
+                        .find(|c| matches!(c.status, ConnectionStatus::Connected { .. }))
+                        .map(|c| c.name.clone());
                 }
                 if let Some(ref runtime) = self.lua_runtime
                     && let Ok(data) = runtime.lua.create_table()
@@ -115,23 +134,19 @@ impl AppState {
                 }
             },
             DbEvent::SchemaLoaded { connection_name, nodes } => {
-                if self.active_connection.as_deref() == Some(connection_name) {
-                    self.explorer.set_tree(nodes.clone());
-                }
+                self.explorer.set_tree_for_source(connection_name, nodes.clone());
             },
             DbEvent::ColumnsLoaded { connection_name, schema, table, columns } => {
-                if self.active_connection.as_deref() == Some(connection_name) {
-                    let column_nodes: Vec<SchemaNode> = columns
-                        .iter()
-                        .map(|c| SchemaNode::Column {
-                            name: c.name.clone(),
-                            data_type: c.data_type.clone(),
-                            nullable: c.nullable,
-                            is_primary_key: c.is_primary_key,
-                        })
-                        .collect();
-                    self.explorer.insert_columns(schema, table, column_nodes);
-                }
+                let column_nodes: Vec<SchemaNode> = columns
+                    .iter()
+                    .map(|c| SchemaNode::Column {
+                        name: c.name.clone(),
+                        data_type: c.data_type.clone(),
+                        nullable: c.nullable,
+                        is_primary_key: c.is_primary_key,
+                    })
+                    .collect();
+                self.explorer.insert_columns(connection_name, schema, table, column_nodes);
             },
             DbEvent::QueryStarted { .. } => {
                 let is_page_fetch = {
