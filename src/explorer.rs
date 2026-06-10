@@ -35,6 +35,7 @@ pub struct FlatNode {
     pub is_primary_key: bool,
     pub expanded: bool,
     pub loaded: bool,
+    pub expandable: bool,
     pub icon: Option<(char, Color)>,
 }
 
@@ -93,6 +94,7 @@ impl SchemaExplorer {
                         is_primary_key: false,
                         expanded: *expanded,
                         loaded: true,
+                        expandable: true,
                         icon: Some(icons.schema),
                     });
                     if *expanded {
@@ -111,6 +113,7 @@ impl SchemaExplorer {
                         is_primary_key: false,
                         expanded: *expanded,
                         loaded: *loaded,
+                        expandable: true,
                         icon: Some(icons.table),
                     });
                     if *expanded {
@@ -129,6 +132,7 @@ impl SchemaExplorer {
                         is_primary_key: false,
                         expanded: false,
                         loaded: true,
+                        expandable: false,
                         icon: Some(icons.view),
                     });
                 },
@@ -144,6 +148,7 @@ impl SchemaExplorer {
                         is_primary_key: *is_primary_key,
                         expanded: false,
                         loaded: true,
+                        expandable: false,
                         icon: Some(icons.column),
                     });
                 },
@@ -159,6 +164,7 @@ impl SchemaExplorer {
                         is_primary_key: false,
                         expanded: false,
                         loaded: false,
+                        expandable: false,
                         icon: None,
                     });
                 },

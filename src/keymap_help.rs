@@ -1,20 +1,22 @@
-use crate::state::{Mode, Panel};
+use crate::state::{Mode, Window};
 
 pub struct KeyBinding {
     pub keys: &'static str,
     pub description: &'static str,
 }
 
-pub fn get_keybindings(panel: &Panel, mode: &Mode) -> Vec<KeyBinding> {
+pub fn get_keybindings(window: &Window, mode: &Mode) -> Vec<KeyBinding> {
     match mode {
-        Mode::Normal => match panel {
-            Panel::SchemaExplorer => vec![
+        Mode::Normal => match window {
+            Window::SchemaExplorer => vec![
                 KeyBinding { keys: "j / Down", description: "Next node" },
                 KeyBinding { keys: "k / Up", description: "Previous node" },
                 KeyBinding { keys: "l / Enter", description: "Expand table/schema" },
                 KeyBinding { keys: "h", description: "Collapse node" },
                 KeyBinding { keys: "R", description: "Reload schema" },
-                KeyBinding { keys: "Tab", description: "Switch to Query Editor" },
+                KeyBinding { keys: "Tab", description: "Next tab" },
+                KeyBinding { keys: "Shift+Tab", description: "Previous tab" },
+                KeyBinding { keys: "Ctrl+h/j/k/l", description: "Navigate window" },
                 KeyBinding { keys: "K / Ctrl+Q", description: "Quick doc popup" },
                 KeyBinding { keys: "?", description: "Keymap help" },
                 KeyBinding { keys: ":", description: "Command palette" },
@@ -23,7 +25,7 @@ pub fn get_keybindings(panel: &Panel, mode: &Mode) -> Vec<KeyBinding> {
                 KeyBinding { keys: "/", description: "Search (type to filter)" },
                 KeyBinding { keys: "Esc", description: "Clear search" },
             ],
-            Panel::QueryEditor => vec![
+            Window::QueryEditor => vec![
                 KeyBinding { keys: "h/j/k/l", description: "Move cursor" },
                 KeyBinding { keys: "w/b/e", description: "Word motion" },
                 KeyBinding { keys: "i/I/a/A/o/O", description: "Enter Insert mode" },
@@ -31,34 +33,34 @@ pub fn get_keybindings(panel: &Panel, mode: &Mode) -> Vec<KeyBinding> {
                 KeyBinding { keys: "Ctrl+C", description: "Cancel query" },
                 KeyBinding { keys: "Ctrl+P/N", description: "History prev/next" },
                 KeyBinding { keys: "Ctrl+T", description: "Toggle auto-paginate" },
-                KeyBinding { keys: "Ctrl+W s/v", description: "Split horizontally/vertically" },
-                KeyBinding { keys: "Ctrl+W q", description: "Close editor" },
-                KeyBinding { keys: "Ctrl+W h/j/k/l", description: "Focus editor" },
-                KeyBinding { keys: "Tab", description: "Switch to Result Grid" },
+                KeyBinding { keys: "Ctrl+h/j/k/l", description: "Navigate window" },
+                KeyBinding { keys: "Ctrl+W v/s", description: "Split vertically/horizontally" },
+                KeyBinding { keys: "Ctrl+W q", description: "Close split" },
+                KeyBinding { keys: "Ctrl+W o", description: "Close other splits" },
+                KeyBinding { keys: "Ctrl+W w", description: "Cycle windows" },
+                KeyBinding { keys: "Ctrl+W h/j/k/l", description: "Navigate splits/windows" },
+                KeyBinding { keys: "Tab", description: "Next tab" },
+                KeyBinding { keys: "Shift+Tab", description: "Previous tab" },
+                KeyBinding { keys: "Space+b", description: "New tab" },
+                KeyBinding { keys: "Space+x", description: "Close tab" },
+                KeyBinding { keys: "Ctrl+Shift+h/l", description: "Move tab left/right" },
                 KeyBinding { keys: ":", description: "Command palette" },
                 KeyBinding { keys: "v", description: "Visual mode" },
             ],
-            Panel::ResultGrid => vec![
-                KeyBinding { keys: "j/k / Down/Up", description: "Next/prev row" },
-                KeyBinding { keys: "h/l / Left/Right", description: "Next/prev column" },
-                KeyBinding { keys: "g g", description: "First row" },
-                KeyBinding { keys: "G", description: "Last row" },
-                KeyBinding { keys: "H", description: "First column" },
-                KeyBinding { keys: "L", description: "Last column" },
-                KeyBinding { keys: "e", description: "Edit cell" },
-                KeyBinding { keys: "Enter", description: "Cell popup" },
-                KeyBinding { keys: "y", description: "Copy cell" },
-                KeyBinding { keys: "Y", description: "Copy row (TSV)" },
-                KeyBinding { keys: "v", description: "Visual mode" },
-                KeyBinding { keys: "Ctrl+D", description: "Page down" },
-                KeyBinding { keys: "Ctrl+U", description: "Page up" },
-                KeyBinding { keys: "Tab", description: "Switch to Output" },
-                KeyBinding { keys: ":", description: "Command palette" },
-            ],
-            Panel::Output => vec![
-                KeyBinding { keys: "j/k", description: "Scroll down/up" },
-                KeyBinding { keys: "g/G", description: "Top/bottom" },
-                KeyBinding { keys: "Tab", description: "Switch to Schema Explorer" },
+            Window::OutputResults => vec![
+                KeyBinding { keys: "j/k", description: "Scroll down/up / next/prev row" },
+                KeyBinding { keys: "h/l", description: "Left/right column (grid)" },
+                KeyBinding { keys: "g g / G", description: "First/last (row/output)" },
+                KeyBinding { keys: "H/L", description: "First/last column (grid)" },
+                KeyBinding { keys: "e", description: "Edit cell (grid)" },
+                KeyBinding { keys: "Enter", description: "Cell popup (grid)" },
+                KeyBinding { keys: "y/Y", description: "Copy cell/row (grid)" },
+                KeyBinding { keys: "v", description: "Visual mode (grid)" },
+                KeyBinding { keys: "Ctrl+D/U", description: "Page down/up (grid)" },
+                KeyBinding { keys: "Ctrl+h/j/k/l", description: "Navigate window" },
+                KeyBinding { keys: "Tab", description: "Switch to next tab" },
+                KeyBinding { keys: "Shift+Tab", description: "Previous tab" },
+                KeyBinding { keys: "Space+x", description: "Close result tab" },
                 KeyBinding { keys: ":", description: "Command palette" },
             ],
         },
@@ -69,7 +71,7 @@ pub fn get_keybindings(panel: &Panel, mode: &Mode) -> Vec<KeyBinding> {
             KeyBinding { keys: "Ctrl+P/N", description: "History prev/next" },
             KeyBinding { keys: "Backspace", description: "Delete previous char" },
             KeyBinding { keys: "Enter", description: "New line" },
-            KeyBinding { keys: "Tab", description: "Insert tab (2 spaces)" },
+            KeyBinding { keys: "Tab", description: "Insert tab (4 spaces)" },
         ],
         Mode::Command { .. } => vec![
             KeyBinding { keys: "Enter", description: "Execute command" },

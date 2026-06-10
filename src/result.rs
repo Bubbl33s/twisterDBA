@@ -42,6 +42,7 @@ pub struct ResultGrid {
     pub visual_mode: bool,
     pub visual_start: Option<(usize, usize)>,
     pub null_display: String,
+    #[allow(dead_code)]
     pub current_page: usize,
     pub has_more: bool,
     pub source_schema: Option<String>,
@@ -107,6 +108,7 @@ impl ResultGrid {
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.columns.clear();
         self.rows.clear();
