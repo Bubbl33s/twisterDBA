@@ -136,8 +136,11 @@ pub async fn execute_sqlite_query(
     sql: String,
     cancel: CancellationToken,
     tx: &mpsc::UnboundedSender<AppEvent>,
+    connection_name: &str,
 ) {
-    let _ = tx.send(AppEvent::DbEvent(DbEvent::QueryStarted));
+    let _ = tx.send(AppEvent::DbEvent(DbEvent::QueryStarted {
+        connection_name: connection_name.to_string(),
+    }));
 
     let start = std::time::Instant::now();
     let mut rows_affected: u64 = 0;
@@ -147,7 +150,9 @@ pub async fn execute_sqlite_query(
     loop {
         tokio::select! {
             _ = cancel.cancelled() => {
-                let _ = tx.send(AppEvent::DbEvent(DbEvent::QueryCancelled));
+                let _ = tx.send(AppEvent::DbEvent(DbEvent::QueryCancelled {
+                    connection_name: connection_name.to_string(),
+                }));
                 return;
             }
             result = stream.next() => {
@@ -163,7 +168,10 @@ pub async fn execute_sqlite_query(
                                 })
                                 .collect();
                             let _ = tx.send(AppEvent::DbEvent(
-                                DbEvent::ResultColumns(col_meta),
+                                DbEvent::ResultColumns {
+                                    connection_name: connection_name.to_string(),
+                                    columns: col_meta,
+                                },
                             ));
                             columns_sent = true;
                         }
@@ -177,18 +185,25 @@ pub async fn execute_sqlite_query(
                                     .unwrap_or_else(|_| "?".into())
                             })
                             .collect();
-                        let _ = tx.send(AppEvent::DbEvent(DbEvent::QueryRow(values)));
+                        let _ = tx.send(AppEvent::DbEvent(DbEvent::QueryRow {
+                            connection_name: connection_name.to_string(),
+                            cells: values,
+                        }));
                         rows_affected += 1;
                     }
                     Some(Err(e)) => {
                         let _ = tx.send(AppEvent::DbEvent(
-                            DbEvent::QueryError(format!("SQLite: {e}")),
+                            DbEvent::QueryError {
+                                connection_name: connection_name.to_string(),
+                                message: format!("SQLite: {e}"),
+                            },
                         ));
                         return;
                     }
                     None => {
                         let duration_ms = start.elapsed().as_millis() as u64;
                         let _ = tx.send(AppEvent::DbEvent(DbEvent::QueryCompleted {
+                            connection_name: connection_name.to_string(),
                             _rows_affected: rows_affected,
                             _duration_ms: duration_ms,
                         }));

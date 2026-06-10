@@ -6,7 +6,7 @@ use ratatui::{
     widgets::Paragraph,
 };
 
-use crate::state::{AppState, ConnectionStatus, Mode, Window};
+use crate::state::{AppState, Mode, Window};
 use crate::theme::Theme;
 
 pub fn render_status_bar(f: &mut Frame, area: Rect, state: &AppState, theme: &Theme) {
@@ -124,22 +124,30 @@ fn render_connection_status(state: &AppState) -> Line<'static> {
         ));
     }
 
-    match &state.connection_status {
-        ConnectionStatus::Disconnected => {
-            Line::from(Span::styled("○ Disconnected", Style::default().fg(Color::Gray)))
-        },
-        ConnectionStatus::Connecting { .. } => {
-            let spinner = state.spinner_char();
-            Line::from(Span::styled(
-                format!("{} Connecting...", spinner),
-                Style::default().fg(Color::Yellow),
-            ))
-        },
-        ConnectionStatus::Connected { masked, .. } => {
-            Line::from(Span::styled(format!("● {}", masked), Style::default().fg(Color::Green)))
-        },
-        ConnectionStatus::Error(msg) => {
-            Line::from(Span::styled(format!("✗ {}", msg), Style::default().fg(Color::Red)))
+    match state.active_connection_entry() {
+        None => Line::from(Span::styled("○ Disconnected", Style::default().fg(Color::Gray))),
+        Some(entry) => {
+            use crate::state::ConnectionStatus;
+            match &entry.status {
+                ConnectionStatus::Connecting { .. } => {
+                    let spinner = state.spinner_char();
+                    Line::from(Span::styled(
+                        format!("{} Connecting...", spinner),
+                        Style::default().fg(Color::Yellow),
+                    ))
+                },
+                ConnectionStatus::Connected { .. } => Line::from(Span::styled(
+                    format!("● {}", entry.name),
+                    Style::default().fg(Color::Green),
+                )),
+                ConnectionStatus::Error(msg) => {
+                    Line::from(Span::styled(format!("✗ {}", msg), Style::default().fg(Color::Red)))
+                },
+                ConnectionStatus::Disconnected => Line::from(Span::styled(
+                    format!("○ {}", entry.name),
+                    Style::default().fg(Color::Gray),
+                )),
+            }
         },
     }
 }

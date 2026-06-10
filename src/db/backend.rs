@@ -15,6 +15,7 @@ pub enum DbBackend {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
 pub enum EngineType {
     Postgres,
     Mysql,

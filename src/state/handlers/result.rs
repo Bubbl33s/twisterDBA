@@ -252,9 +252,12 @@ impl super::super::AppState {
                 self.cell_edit_row = row_idx;
                 self.cell_edit_col = selected_col;
 
-                if let Some(tx) = self.db_tx.clone() {
+                if let Some(tx) = self.db_tx.clone()
+                    && let Some(ref conn_name) = self.active_connection.clone()
+                {
                     let cancel = tokio_util::sync::CancellationToken::new();
                     let _ = tx.send(DbCommand::ExecuteQuery {
+                        connection_name: conn_name.clone(),
                         sql: update_sql,
                         cancel,
                         auto_paginate: false,
@@ -275,8 +278,10 @@ impl super::super::AppState {
             return;
         }
         let next_page = self.focused_editor().current_page + 1;
-        if let Some(tx) = self.db_tx.clone() {
-            self.focused_editor_mut().fetch_next_page(&tx, next_page);
+        if let Some(tx) = self.db_tx.clone()
+            && let Some(ref conn_name) = self.active_connection.clone()
+        {
+            self.focused_editor_mut().fetch_next_page(&tx, conn_name, next_page);
         }
     }
 

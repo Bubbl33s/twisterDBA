@@ -1,9 +1,10 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::db::backend::EngineType;
 use crate::db::client::DbCommand;
 use crate::events::DbEvent;
 use crate::explorer::SchemaNode;
-use crate::state::{AppState, ConnectionStatus, PopupState};
+use crate::state::{AppState, ConnectionEntry, ConnectionStatus, PopupState};
 
 fn timestamp() -> String {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
@@ -17,20 +18,41 @@ fn timestamp() -> String {
 impl AppState {
     pub fn apply_db_event(&mut self, event: &DbEvent) {
         match event {
-            DbEvent::Connected => {
-                let (dsn, masked) = match &self.connection_status {
-                    ConnectionStatus::Connecting { dsn, masked } => (dsn.clone(), masked.clone()),
-                    other => match other {
+            DbEvent::Connected { connection_name } => {
+                let (dsn, masked) = if let Some(entry) = self.connection_by_name(connection_name) {
+                    match &entry.status {
+                        ConnectionStatus::Connecting { dsn, masked } => {
+                            (dsn.clone(), masked.clone())
+                        },
                         ConnectionStatus::Connected { dsn, masked } => {
                             (dsn.clone(), masked.clone())
                         },
-                        _ => (String::new(), String::new()),
-                    },
+                        _ => (String::new(), entry.masked_dsn.clone()),
+                    }
+                } else {
+                    (String::new(), String::new())
                 };
+
+                if let Some(entry) = self.connection_by_name_mut(connection_name) {
+                    entry.status =
+                        ConnectionStatus::Connected { dsn: dsn.clone(), masked: masked.clone() };
+                } else {
+                    self.connections.push(ConnectionEntry {
+                        name: connection_name.clone(),
+                        engine_type: EngineType::Postgres,
+                        status: ConnectionStatus::Connected {
+                            dsn: dsn.clone(),
+                            masked: masked.clone(),
+                        },
+                        masked_dsn: masked.clone(),
+                    });
+                }
+
+                self.active_connection = Some(connection_name.clone());
+
                 let output = format!("[{}] Connected to {}", timestamp(), masked);
                 self.output_results.output.push(output);
-                self.connection_status =
-                    ConnectionStatus::Connected { dsn: dsn.clone(), masked: masked.clone() };
+
                 if let (Some(password), Some(profile_name)) =
                     (self.pending_keychain_password.take(), self.pending_profile_name.take())
                 {
@@ -54,7 +76,8 @@ impl AppState {
                     }
                 }
                 if let Some(tx) = self.db_tx.clone() {
-                    let _ = tx.send(DbCommand::LoadSchema);
+                    let _ =
+                        tx.send(DbCommand::LoadSchema { connection_name: connection_name.clone() });
                 }
                 if let Some(ref runtime) = self.lua_runtime
                     && let Ok(data) = runtime.lua.create_table()
@@ -63,36 +86,54 @@ impl AppState {
                     runtime.fire_event("ConnectionOpened", data);
                 }
             },
-            DbEvent::ConnectionFailed(msg) => {
-                self.connection_status = ConnectionStatus::Error(msg.clone());
-                let output = format!("[{}] Connection failed: {}", timestamp(), msg);
+            DbEvent::ConnectionFailed { connection_name, message } => {
+                if let Some(entry) = self.connection_by_name_mut(connection_name) {
+                    entry.status = ConnectionStatus::Error(message.clone());
+                } else {
+                    self.connections.push(ConnectionEntry {
+                        name: connection_name.clone(),
+                        engine_type: EngineType::Postgres,
+                        status: ConnectionStatus::Error(message.clone()),
+                        masked_dsn: String::new(),
+                    });
+                }
+                let output = format!("[{}] Connection failed: {}", timestamp(), message);
                 self.output_results.output.push(output);
             },
-            DbEvent::Disconnected => {
-                self.connection_status = ConnectionStatus::Disconnected;
-                self.explorer = crate::explorer::SchemaExplorer::new();
+            DbEvent::Disconnected { connection_name } => {
+                if let Some(entry) = self.connection_by_name_mut(connection_name) {
+                    entry.status = ConnectionStatus::Disconnected;
+                }
+                if self.active_connection.as_deref() == Some(connection_name) {
+                    self.active_connection = None;
+                    self.explorer = crate::explorer::SchemaExplorer::new();
+                }
                 if let Some(ref runtime) = self.lua_runtime
                     && let Ok(data) = runtime.lua.create_table()
                 {
                     runtime.fire_event("ConnectionClosed", data);
                 }
             },
-            DbEvent::SchemaLoaded(nodes) => {
-                self.explorer.set_tree(nodes.clone());
+            DbEvent::SchemaLoaded { connection_name, nodes } => {
+                if self.active_connection.as_deref() == Some(connection_name) {
+                    self.explorer.set_tree(nodes.clone());
+                }
             },
-            DbEvent::ColumnsLoaded { schema, table, columns } => {
-                let column_nodes: Vec<SchemaNode> = columns
-                    .iter()
-                    .map(|c| SchemaNode::Column {
-                        name: c.name.clone(),
-                        data_type: c.data_type.clone(),
-                        nullable: c.nullable,
-                        is_primary_key: c.is_primary_key,
-                    })
-                    .collect();
-                self.explorer.insert_columns(schema, table, column_nodes);
+            DbEvent::ColumnsLoaded { connection_name, schema, table, columns } => {
+                if self.active_connection.as_deref() == Some(connection_name) {
+                    let column_nodes: Vec<SchemaNode> = columns
+                        .iter()
+                        .map(|c| SchemaNode::Column {
+                            name: c.name.clone(),
+                            data_type: c.data_type.clone(),
+                            nullable: c.nullable,
+                            is_primary_key: c.is_primary_key,
+                        })
+                        .collect();
+                    self.explorer.insert_columns(schema, table, column_nodes);
+                }
             },
-            DbEvent::QueryStarted => {
+            DbEvent::QueryStarted { .. } => {
                 let is_page_fetch = {
                     let editor = self.focused_editor();
                     editor.auto_paginate && editor.current_page > 0
@@ -108,13 +149,13 @@ impl AppState {
                 self.active_result_grid_mut().is_streaming = true;
                 self.last_query_error = None;
             },
-            DbEvent::ResultColumns(columns) => {
+            DbEvent::ResultColumns { columns, .. } => {
                 self.active_result_grid_mut().set_columns(columns.clone());
             },
-            DbEvent::QueryRow(cells) => {
+            DbEvent::QueryRow { cells, .. } => {
                 self.active_result_grid_mut().add_row(cells.clone());
             },
-            DbEvent::QueryCompleted { _rows_affected, _duration_ms } => {
+            DbEvent::QueryCompleted { _rows_affected, _duration_ms, .. } => {
                 self.active_result_grid_mut().is_streaming = false;
                 let (is_auto, has_sql, page_size, sql) = {
                     let editor = self.focused_editor();
@@ -172,17 +213,17 @@ impl AppState {
                     runtime.fire_event("QueryExecuted", data);
                 }
             },
-            DbEvent::QueryError(msg) => {
-                self.last_query_error = Some(msg.clone());
+            DbEvent::QueryError { message, .. } => {
+                self.last_query_error = Some(message.clone());
                 self.focused_editor_mut().mark_completed();
-                let output = format!("[{}] ERROR: {}", timestamp(), msg);
+                let output = format!("[{}] ERROR: {}", timestamp(), message);
                 self.output_results.output.push(output);
                 if self.cell_edit_new_value.is_some() {
-                    self.status_message = Some(format!("UPDATE failed: {}", msg));
+                    self.status_message = Some(format!("UPDATE failed: {}", message));
                     self.cell_edit_new_value = None;
                 }
             },
-            DbEvent::QueryCancelled => {
+            DbEvent::QueryCancelled { .. } => {
                 self.focused_editor_mut().mark_completed();
             },
             DbEvent::TableInfoLoaded { ddl, row_count, table_size, .. } => {

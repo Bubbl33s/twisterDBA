@@ -21,32 +21,59 @@ pub struct TableInfo {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum DbEvent {
-    Connected,
-    ConnectionFailed(String),
-    Disconnected,
-    SchemaLoaded(Vec<SchemaNode>),
+    Connected {
+        connection_name: String,
+    },
+    ConnectionFailed {
+        connection_name: String,
+        message: String,
+    },
+    Disconnected {
+        connection_name: String,
+    },
+    SchemaLoaded {
+        connection_name: String,
+        nodes: Vec<SchemaNode>,
+    },
     ColumnsLoaded {
+        connection_name: String,
         schema: String,
         table: String,
         columns: Vec<ColumnInfo>,
     },
     TableInfoLoaded {
+        connection_name: String,
         _schema: String,
         _table: String,
         ddl: Option<String>,
         row_count: Option<u64>,
         table_size: Option<String>,
     },
-    QueryStarted,
-    ResultColumns(Vec<ColumnMeta>),
-    QueryRow(Vec<String>),
+    QueryStarted {
+        connection_name: String,
+    },
+    ResultColumns {
+        connection_name: String,
+        columns: Vec<ColumnMeta>,
+    },
+    QueryRow {
+        connection_name: String,
+        cells: Vec<String>,
+    },
     QueryCompleted {
+        connection_name: String,
         _rows_affected: u64,
         _duration_ms: u64,
     },
-    QueryError(String),
-    QueryCancelled,
+    QueryError {
+        connection_name: String,
+        message: String,
+    },
+    QueryCancelled {
+        connection_name: String,
+    },
 }
 
 pub enum AppEvent {

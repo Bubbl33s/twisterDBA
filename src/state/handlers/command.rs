@@ -269,8 +269,10 @@ impl AppState {
                 return;
             },
             "disconnect" => {
-                if let Some(tx) = self.db_tx.clone() {
-                    let _ = tx.send(DbCommand::Disconnect);
+                if let Some(ref conn_name) = self.active_connection.clone()
+                    && let Some(tx) = self.db_tx.clone()
+                {
+                    let _ = tx.send(DbCommand::Disconnect { connection_name: conn_name.clone() });
                 }
             },
             cmd if cmd.starts_with("connect ") => {
@@ -280,11 +282,32 @@ impl AppState {
                 if is_dsn {
                     let masked = mask_raw_dsn(&arg);
                     let engine_type = engine_from_dsn(&arg);
-                    self.connection_status =
-                        ConnectionStatus::Connecting { dsn: arg.clone(), masked };
+                    let connection_name = arg.clone();
+                    if let Some(entry) =
+                        self.connections.iter_mut().find(|c| c.name == connection_name)
+                    {
+                        entry.status = ConnectionStatus::Connecting {
+                            dsn: arg.clone(),
+                            masked: masked.clone(),
+                        };
+                        entry.masked_dsn = masked.clone();
+                    } else {
+                        self.connections.push(crate::state::ConnectionEntry {
+                            name: connection_name.clone(),
+                            engine_type,
+                            status: ConnectionStatus::Connecting {
+                                dsn: arg.clone(),
+                                masked: masked.clone(),
+                            },
+                            masked_dsn: masked.clone(),
+                        });
+                    }
                     if let Some(tx) = self.db_tx.clone() {
-                        let _ = tx
-                            .send(DbCommand::Connect { dsn: SecretString::from(arg), engine_type });
+                        let _ = tx.send(DbCommand::Connect {
+                            connection_name,
+                            dsn: SecretString::from(arg),
+                            engine_type,
+                        });
                     }
                 } else if let Some(profile) =
                     self.config.connections.iter().find(|p| p.name == arg).cloned()

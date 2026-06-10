@@ -26,26 +26,41 @@ impl App {
         state.db_tx = Some(db_tx.clone());
 
         if let Ok(Some(session)) = load_session_from_disk() {
-            let profile_name = session.connection_profile.clone();
+            let saved_connections = session.saved_connections.clone();
+            let active_connection = session.active_connection.clone();
             state.apply_session_data(session);
 
-            if let Some(ref profile_name) = profile_name
-                && let Some(profile) =
+            for profile_name in &saved_connections {
+                if let Some(profile) =
                     state.config.connections.iter().find(|p| p.name == *profile_name)
-            {
-                let password = profile.get_password().unwrap_or_default();
-                let dsn = build_dsn_from_profile(profile, &password);
-                let engine_type = match profile.db_type.as_str() {
-                    "mysql" => crate::db::backend::EngineType::Mysql,
-                    "sqlite" => crate::db::backend::EngineType::Sqlite,
-                    _ => crate::db::backend::EngineType::Postgres,
-                };
-                state.connection_status = crate::state::ConnectionStatus::Connecting {
-                    dsn: dsn.clone(),
-                    masked: crate::state::mask_raw_dsn(&dsn),
-                };
-                let _ =
-                    db_tx.send(DbCommand::Connect { dsn: SecretString::from(dsn), engine_type });
+                {
+                    let password = profile.get_password().unwrap_or_default();
+                    let dsn = build_dsn_from_profile(profile, &password);
+                    let engine_type = match profile.db_type.as_str() {
+                        "mysql" => crate::db::backend::EngineType::Mysql,
+                        "sqlite" => crate::db::backend::EngineType::Sqlite,
+                        _ => crate::db::backend::EngineType::Postgres,
+                    };
+                    let masked = crate::state::mask_raw_dsn(&dsn);
+                    state.connections.push(crate::state::ConnectionEntry {
+                        name: profile_name.clone(),
+                        engine_type,
+                        status: crate::state::ConnectionStatus::Connecting {
+                            dsn: dsn.clone(),
+                            masked: masked.clone(),
+                        },
+                        masked_dsn: masked,
+                    });
+                    let _ = db_tx.send(DbCommand::Connect {
+                        connection_name: profile_name.clone(),
+                        dsn: SecretString::from(dsn),
+                        engine_type,
+                    });
+                }
+            }
+
+            if let Some(ref active) = active_connection {
+                state.active_connection = Some(active.clone());
             }
         }
 

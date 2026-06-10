@@ -8,6 +8,15 @@ pub enum ConnectionStatus {
     Error(String),
 }
 
+#[derive(Debug, Clone)]
+pub struct ConnectionEntry {
+    pub name: String,
+    #[allow(dead_code)]
+    pub engine_type: EngineType,
+    pub status: ConnectionStatus,
+    pub masked_dsn: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConnectField {
     pub label: &'static str,

@@ -19,7 +19,7 @@ use crate::lua::LuaRuntime;
 use crate::result::ResultGrid;
 use crate::theme::Theme;
 
-pub use connection::{ConnectField, ConnectForm, ConnectionStatus};
+pub use connection::{ConnectField, ConnectForm, ConnectionEntry, ConnectionStatus};
 pub use handlers::command::mask_raw_dsn;
 pub use mode::{Mode, SplitDirection, Window};
 pub use output::{CellPopupState, OutputPaneState, OutputResultsState};
@@ -49,7 +49,8 @@ pub struct AppState {
     pub mode: Mode,
     pub focused_window: Window,
     pub should_quit: bool,
-    pub connection_status: ConnectionStatus,
+    pub connections: Vec<ConnectionEntry>,
+    pub active_connection: Option<String>,
     pub spinner_frame: usize,
     pub db_tx: Option<mpsc::UnboundedSender<DbCommand>>,
     pub explorer: SchemaExplorer,
@@ -84,7 +85,8 @@ impl AppState {
             mode: Mode::Normal,
             focused_window: Window::SchemaExplorer,
             should_quit: false,
-            connection_status: ConnectionStatus::Disconnected,
+            connections: Vec::new(),
+            active_connection: None,
             spinner_frame: 0,
             db_tx: None,
             explorer: SchemaExplorer::new(),
@@ -353,6 +355,25 @@ impl AppState {
 
     pub fn spinner_char(&self) -> &'static str {
         SPINNER_FRAMES[self.spinner_frame]
+    }
+
+    pub fn active_connection_entry(&self) -> Option<&ConnectionEntry> {
+        let name = self.active_connection.as_ref()?;
+        self.connections.iter().find(|c| &c.name == name)
+    }
+
+    #[allow(dead_code)]
+    pub fn active_connection_entry_mut(&mut self) -> Option<&mut ConnectionEntry> {
+        let name = self.active_connection.clone()?;
+        self.connections.iter_mut().find(|c| c.name == name)
+    }
+
+    pub fn connection_by_name(&self, name: &str) -> Option<&ConnectionEntry> {
+        self.connections.iter().find(|c| c.name == name)
+    }
+
+    pub fn connection_by_name_mut(&mut self, name: &str) -> Option<&mut ConnectionEntry> {
+        self.connections.iter_mut().find(|c| c.name == name)
     }
 }
 

@@ -56,8 +56,11 @@ impl super::super::AppState {
                 loading: true,
                 scroll: 0,
             };
-            if let Some(tx) = self.db_tx.clone() {
+            if let Some(ref conn_name) = self.active_connection.clone()
+                && let Some(tx) = self.db_tx.clone()
+            {
                 let _ = tx.send(DbCommand::LoadTableInfo {
+                    connection_name: conn_name.clone(),
                     schema: schema.clone(),
                     table: table.clone(),
                 });

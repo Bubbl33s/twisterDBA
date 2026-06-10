@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::db::backend::{DbBackend, EngineType};
 use crate::db::mysql::{
     execute_mysql_query, load_mysql_columns, load_mysql_schema, load_mysql_table_info,
@@ -15,21 +17,29 @@ use tracing::{error, info};
 
 pub enum DbCommand {
     Connect {
+        connection_name: String,
         dsn: SecretString,
         engine_type: EngineType,
     },
-    Disconnect,
-    LoadSchema,
+    Disconnect {
+        connection_name: String,
+    },
+    LoadSchema {
+        connection_name: String,
+    },
     LoadColumns {
+        connection_name: String,
         schema: String,
         table: String,
     },
     LoadTableInfo {
+        connection_name: String,
         schema: String,
         table: String,
     },
     #[allow(dead_code)]
     ExecuteQuery {
+        connection_name: String,
         sql: String,
         cancel: CancellationToken,
         auto_paginate: bool,
@@ -37,6 +47,7 @@ pub enum DbCommand {
     },
     #[allow(dead_code)]
     FetchNextPage {
+        connection_name: String,
         page: usize,
         sql: String,
         cancel: CancellationToken,
@@ -44,7 +55,7 @@ pub enum DbCommand {
 }
 
 pub struct DbClient {
-    backend: Option<DbBackend>,
+    backends: HashMap<String, DbBackend>,
     command_rx: mpsc::UnboundedReceiver<DbCommand>,
     event_tx: mpsc::UnboundedSender<AppEvent>,
 }
@@ -54,64 +65,80 @@ impl DbClient {
         command_rx: mpsc::UnboundedReceiver<DbCommand>,
         event_tx: mpsc::UnboundedSender<AppEvent>,
     ) -> Self {
-        Self { backend: None, command_rx, event_tx }
+        Self { backends: HashMap::new(), command_rx, event_tx }
     }
 
     pub async fn run(&mut self) {
         while let Some(cmd) = self.command_rx.recv().await {
             match cmd {
-                DbCommand::Connect { dsn, engine_type } => {
-                    self.handle_connect(dsn, engine_type).await;
+                DbCommand::Connect { connection_name, dsn, engine_type } => {
+                    self.handle_connect(&connection_name, dsn, engine_type).await;
                 },
-                DbCommand::Disconnect => self.handle_disconnect().await,
-                DbCommand::LoadSchema => self.handle_load_schema().await,
-                DbCommand::LoadColumns { schema, table } => {
-                    self.handle_load_columns(&schema, &table).await;
+                DbCommand::Disconnect { connection_name } => {
+                    self.handle_disconnect(&connection_name).await;
                 },
-                DbCommand::LoadTableInfo { schema, table } => {
-                    self.handle_load_table_info(&schema, &table).await;
+                DbCommand::LoadSchema { connection_name } => {
+                    self.handle_load_schema(&connection_name).await;
                 },
-                DbCommand::ExecuteQuery { sql, cancel, .. } => {
-                    self.handle_execute_query(sql, cancel).await;
+                DbCommand::LoadColumns { connection_name, schema, table } => {
+                    self.handle_load_columns(&connection_name, &schema, &table).await;
                 },
-                DbCommand::FetchNextPage { sql, cancel, .. } => {
-                    self.handle_execute_query(sql, cancel).await;
+                DbCommand::LoadTableInfo { connection_name, schema, table } => {
+                    self.handle_load_table_info(&connection_name, &schema, &table).await;
+                },
+                DbCommand::ExecuteQuery { connection_name, sql, cancel, .. } => {
+                    self.handle_execute_query(&connection_name, sql, cancel).await;
+                },
+                DbCommand::FetchNextPage { connection_name, sql, cancel, .. } => {
+                    self.handle_execute_query(&connection_name, sql, cancel).await;
                 },
             }
         }
     }
 
-    async fn handle_connect(&mut self, dsn: SecretString, engine_type: EngineType) {
-        if let Some(backend) = self.backend.take() {
-            backend.close().await;
+    async fn handle_connect(
+        &mut self,
+        connection_name: &str,
+        dsn: SecretString,
+        engine_type: EngineType,
+    ) {
+        if let Some(old) = self.backends.remove(connection_name) {
+            old.close().await;
         }
 
         match DbBackend::connect(&dsn, engine_type).await {
             Ok(backend) => {
-                self.backend = Some(backend);
-                let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::Connected));
+                self.backends.insert(connection_name.to_string(), backend);
+                let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::Connected {
+                    connection_name: connection_name.to_string(),
+                }));
             },
             Err(e) => {
-                self.backend = None;
-                let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed(e)));
+                let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed {
+                    connection_name: connection_name.to_string(),
+                    message: e,
+                }));
             },
         }
     }
 
-    async fn handle_disconnect(&mut self) {
-        if let Some(backend) = self.backend.take() {
+    async fn handle_disconnect(&mut self, connection_name: &str) {
+        if let Some(backend) = self.backends.remove(connection_name) {
             backend.close().await;
         }
-        let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::Disconnected));
+        let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::Disconnected {
+            connection_name: connection_name.to_string(),
+        }));
     }
 
-    async fn handle_load_schema(&mut self) {
-        let backend = match &self.backend {
+    async fn handle_load_schema(&mut self, connection_name: &str) {
+        let backend = match self.backends.get(connection_name) {
             Some(b) => b,
             None => {
-                let _ = self
-                    .event_tx
-                    .send(AppEvent::DbEvent(DbEvent::ConnectionFailed("Not connected".into())));
+                let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed {
+                    connection_name: connection_name.to_string(),
+                    message: format!("Unknown connection: {connection_name}"),
+                }));
                 return;
             },
         };
@@ -120,43 +147,62 @@ impl DbClient {
             DbBackend::Pg(pool) => match load_pg_schema(pool).await {
                 Ok(tree) => {
                     info!("Schema loaded: {} schemas", tree.len());
-                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::SchemaLoaded(tree)));
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::SchemaLoaded {
+                        connection_name: connection_name.to_string(),
+                        nodes: tree,
+                    }));
                 },
                 Err(e) => {
                     error!("LoadSchema query failed: {e}");
-                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed(e)));
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed {
+                        connection_name: connection_name.to_string(),
+                        message: e,
+                    }));
                 },
             },
             DbBackend::Mysql(pool) => match load_mysql_schema(pool).await {
                 Ok(tree) => {
                     info!("MySQL schema loaded: {} schemas", tree.len());
-                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::SchemaLoaded(tree)));
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::SchemaLoaded {
+                        connection_name: connection_name.to_string(),
+                        nodes: tree,
+                    }));
                 },
                 Err(e) => {
                     error!("MySQL LoadSchema query failed: {e}");
-                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed(e)));
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed {
+                        connection_name: connection_name.to_string(),
+                        message: e,
+                    }));
                 },
             },
             DbBackend::Sqlite(pool) => match load_sqlite_schema(pool).await {
                 Ok(tree) => {
                     info!("SQLite schema loaded: {} tables", tree.len());
-                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::SchemaLoaded(tree)));
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::SchemaLoaded {
+                        connection_name: connection_name.to_string(),
+                        nodes: tree,
+                    }));
                 },
                 Err(e) => {
                     error!("SQLite LoadSchema query failed: {e}");
-                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed(e)));
+                    let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed {
+                        connection_name: connection_name.to_string(),
+                        message: e,
+                    }));
                 },
             },
             DbBackend::Disconnected => {
-                let _ = self
-                    .event_tx
-                    .send(AppEvent::DbEvent(DbEvent::ConnectionFailed("Not connected".into())));
+                let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ConnectionFailed {
+                    connection_name: connection_name.to_string(),
+                    message: "Not connected".into(),
+                }));
             },
         }
     }
 
-    async fn handle_load_columns(&mut self, schema: &str, table: &str) {
-        let backend = match &self.backend {
+    async fn handle_load_columns(&mut self, connection_name: &str, schema: &str, table: &str) {
+        let backend = match self.backends.get(connection_name) {
             Some(b) => b,
             None => return,
         };
@@ -165,6 +211,7 @@ impl DbClient {
             DbBackend::Pg(pool) => match load_pg_columns(pool, schema, table).await {
                 Ok(columns) => {
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ColumnsLoaded {
+                        connection_name: connection_name.to_string(),
                         schema: schema.to_string(),
                         table: table.to_string(),
                         columns,
@@ -177,6 +224,7 @@ impl DbClient {
             DbBackend::Mysql(pool) => match load_mysql_columns(pool, schema, table).await {
                 Ok(columns) => {
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ColumnsLoaded {
+                        connection_name: connection_name.to_string(),
                         schema: schema.to_string(),
                         table: table.to_string(),
                         columns,
@@ -189,6 +237,7 @@ impl DbClient {
             DbBackend::Sqlite(pool) => match load_sqlite_columns(pool, schema, table).await {
                 Ok(columns) => {
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::ColumnsLoaded {
+                        connection_name: connection_name.to_string(),
                         schema: schema.to_string(),
                         table: table.to_string(),
                         columns,
@@ -202,8 +251,8 @@ impl DbClient {
         }
     }
 
-    async fn handle_load_table_info(&mut self, schema: &str, table: &str) {
-        let backend = match &self.backend {
+    async fn handle_load_table_info(&mut self, connection_name: &str, schema: &str, table: &str) {
+        let backend = match self.backends.get(connection_name) {
             Some(b) => b,
             None => return,
         };
@@ -212,6 +261,7 @@ impl DbClient {
             DbBackend::Pg(pool) => match load_pg_table_info(pool, schema, table).await {
                 Ok(info) => {
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableInfoLoaded {
+                        connection_name: connection_name.to_string(),
                         _schema: schema.to_string(),
                         _table: table.to_string(),
                         ddl: info.ddl,
@@ -222,6 +272,7 @@ impl DbClient {
                 Err(e) => {
                     error!("LoadTableInfo failed: {e}");
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableInfoLoaded {
+                        connection_name: connection_name.to_string(),
                         _schema: schema.to_string(),
                         _table: table.to_string(),
                         ddl: Some(format!("Error: {e}")),
@@ -233,6 +284,7 @@ impl DbClient {
             DbBackend::Mysql(pool) => match load_mysql_table_info(pool, schema, table).await {
                 Ok(info) => {
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableInfoLoaded {
+                        connection_name: connection_name.to_string(),
                         _schema: schema.to_string(),
                         _table: table.to_string(),
                         ddl: info.ddl,
@@ -243,6 +295,7 @@ impl DbClient {
                 Err(e) => {
                     error!("MySQL LoadTableInfo failed: {e}");
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableInfoLoaded {
+                        connection_name: connection_name.to_string(),
                         _schema: schema.to_string(),
                         _table: table.to_string(),
                         ddl: Some(format!("Error: {e}")),
@@ -254,6 +307,7 @@ impl DbClient {
             DbBackend::Sqlite(pool) => match load_sqlite_table_info(pool, schema, table).await {
                 Ok(info) => {
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableInfoLoaded {
+                        connection_name: connection_name.to_string(),
                         _schema: schema.to_string(),
                         _table: table.to_string(),
                         ddl: info.ddl,
@@ -264,6 +318,7 @@ impl DbClient {
                 Err(e) => {
                     error!("SQLite LoadTableInfo failed: {e}");
                     let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::TableInfoLoaded {
+                        connection_name: connection_name.to_string(),
                         _schema: schema.to_string(),
                         _table: table.to_string(),
                         ddl: Some(format!("Error: {e}")),
@@ -276,31 +331,39 @@ impl DbClient {
         }
     }
 
-    async fn handle_execute_query(&mut self, sql: String, cancel: CancellationToken) {
-        let backend = match &self.backend {
+    async fn handle_execute_query(
+        &mut self,
+        connection_name: &str,
+        sql: String,
+        cancel: CancellationToken,
+    ) {
+        let backend = match self.backends.get(connection_name) {
             Some(b) => b,
             None => {
-                let _ = self
-                    .event_tx
-                    .send(AppEvent::DbEvent(DbEvent::QueryError("Not connected".into())));
+                let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::QueryError {
+                    connection_name: connection_name.to_string(),
+                    message: format!("Unknown connection: {connection_name}"),
+                }));
                 return;
             },
         };
 
+        let cn = connection_name.to_string();
         match backend {
             DbBackend::Pg(pool) => {
-                execute_pg_query(pool, sql, cancel, &self.event_tx).await;
+                execute_pg_query(pool, sql, cancel, &self.event_tx, &cn).await;
             },
             DbBackend::Mysql(pool) => {
-                execute_mysql_query(pool, sql, cancel, &self.event_tx).await;
+                execute_mysql_query(pool, sql, cancel, &self.event_tx, &cn).await;
             },
             DbBackend::Sqlite(pool) => {
-                execute_sqlite_query(pool, sql, cancel, &self.event_tx).await;
+                execute_sqlite_query(pool, sql, cancel, &self.event_tx, &cn).await;
             },
             DbBackend::Disconnected => {
-                let _ = self
-                    .event_tx
-                    .send(AppEvent::DbEvent(DbEvent::QueryError("Not connected".into())));
+                let _ = self.event_tx.send(AppEvent::DbEvent(DbEvent::QueryError {
+                    connection_name: connection_name.to_string(),
+                    message: "Not connected".into(),
+                }));
             },
         }
     }

@@ -2,7 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 use secrecy::SecretString;
 
 use crate::db::client::DbCommand;
-use crate::state::{ConnectionStatus, Mode};
+use crate::state::{ConnectionEntry, ConnectionStatus, Mode};
 
 impl super::super::AppState {
     pub(crate) fn handle_connect_dialog_key(&mut self, key: KeyEvent) {
@@ -56,13 +56,34 @@ impl super::super::AppState {
                     });
                     if !password.is_empty() {
                         self.pending_keychain_password = Some(password);
-                        self.pending_profile_name = Some(profile_name);
+                        self.pending_profile_name = Some(profile_name.clone());
                     }
-                    self.connection_status =
-                        ConnectionStatus::Connecting { dsn: dsn.clone(), masked };
+                    let masked_dsn = masked.clone();
+                    if let Some(entry) =
+                        self.connections.iter_mut().find(|c| c.name == profile_name)
+                    {
+                        entry.status = ConnectionStatus::Connecting {
+                            dsn: dsn.clone(),
+                            masked: masked.clone(),
+                        };
+                        entry.masked_dsn = masked_dsn.clone();
+                    } else {
+                        self.connections.push(ConnectionEntry {
+                            name: profile_name.clone(),
+                            engine_type,
+                            status: ConnectionStatus::Connecting {
+                                dsn: dsn.clone(),
+                                masked: masked.clone(),
+                            },
+                            masked_dsn,
+                        });
+                    }
                     if let Some(tx) = self.db_tx.clone() {
-                        let _ = tx
-                            .send(DbCommand::Connect { dsn: SecretString::from(dsn), engine_type });
+                        let _ = tx.send(DbCommand::Connect {
+                            connection_name: profile_name,
+                            dsn: SecretString::from(dsn),
+                            engine_type,
+                        });
                     }
                     self.mode = Mode::Normal;
                 },

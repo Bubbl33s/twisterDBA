@@ -14,7 +14,8 @@ impl super::super::AppState {
 
             if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('e') {
                 if let Some(tx) = self.db_tx.clone()
-                    && !self.focused_editor_mut().execute(&tx)
+                    && let Some(ref conn_name) = self.active_connection.clone()
+                    && !self.focused_editor_mut().execute(&tx, conn_name)
                 {
                     self.status_message = Some("No statement under cursor".into());
                 }
@@ -28,7 +29,8 @@ impl super::super::AppState {
                 && key_matches_config(&key, binding)
             {
                 if let Some(tx) = self.db_tx.clone()
-                    && !self.focused_editor_mut().execute(&tx)
+                    && let Some(ref conn_name) = self.active_connection.clone()
+                    && !self.focused_editor_mut().execute(&tx, conn_name)
                 {
                     self.status_message = Some("No statement under cursor".into());
                 }

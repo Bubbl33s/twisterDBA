@@ -74,6 +74,7 @@ impl mlua::UserData for TwisterDBA {
             if let Some(tx) = &this.db_tx {
                 let cancel = tokio_util::sync::CancellationToken::new();
                 let _ = tx.send(DbCommand::ExecuteQuery {
+                    connection_name: String::new(),
                     sql: String::new(),
                     cancel,
                     auto_paginate: false,

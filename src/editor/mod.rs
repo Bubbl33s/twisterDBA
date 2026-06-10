@@ -55,7 +55,11 @@ impl SqlEditor {
         }
     }
 
-    pub fn execute(&mut self, db_tx: &mpsc::UnboundedSender<DbCommand>) -> bool {
+    pub fn execute(
+        &mut self,
+        db_tx: &mpsc::UnboundedSender<DbCommand>,
+        connection_name: &str,
+    ) -> bool {
         if self.executing {
             return false;
         }
@@ -82,6 +86,7 @@ impl SqlEditor {
             };
 
         let _ = db_tx.send(DbCommand::ExecuteQuery {
+            connection_name: connection_name.to_string(),
             sql: final_sql,
             cancel,
             auto_paginate: auto_paginate_applied,
@@ -145,6 +150,7 @@ impl SqlEditor {
     pub fn fetch_next_page(
         &mut self,
         db_tx: &mpsc::UnboundedSender<DbCommand>,
+        connection_name: &str,
         page: usize,
     ) -> bool {
         if self.executing {
@@ -155,7 +161,12 @@ impl SqlEditor {
             let paginated = Self::inject_pagination(sql, page, self.page_size);
             let cancel = CancellationToken::new();
             self.current_cancel = Some(cancel.clone());
-            let _ = db_tx.send(DbCommand::FetchNextPage { page, sql: paginated, cancel });
+            let _ = db_tx.send(DbCommand::FetchNextPage {
+                connection_name: connection_name.to_string(),
+                page,
+                sql: paginated,
+                cancel,
+            });
             self.executing = true;
             true
         } else {

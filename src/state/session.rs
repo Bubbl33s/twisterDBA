@@ -17,7 +17,8 @@ pub struct BufferSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionData {
-    pub connection_profile: Option<String>,
+    pub active_connection: Option<String>,
+    pub saved_connections: Vec<String>,
     pub buffers: Vec<BufferSnapshot>,
     pub focused_buffer: usize,
     pub focused_panel: String,
@@ -26,14 +27,12 @@ pub struct SessionData {
 
 impl AppState {
     pub fn to_session_data(&self) -> SessionData {
-        let connection_profile = match &self.connection_status {
-            super::connection::ConnectionStatus::Connected { .. } => {
-                self.config.connections.iter().find_map(|p| {
-                    if p.password_is_keychain() { Some(p.name.clone()) } else { None }
-                })
-            },
-            _ => None,
-        };
+        let saved_connections: Vec<String> = self
+            .connections
+            .iter()
+            .filter(|c| matches!(c.status, super::connection::ConnectionStatus::Connected { .. }))
+            .map(|c| c.name.clone())
+            .collect();
         let buffers: Vec<BufferSnapshot> = self
             .editor_splits
             .iter()
@@ -58,7 +57,8 @@ impl AppState {
             SplitDirection::Vertical => "vertical".to_string(),
         };
         SessionData {
-            connection_profile,
+            active_connection: self.active_connection.clone(),
+            saved_connections,
             buffers,
             focused_buffer: self.active_split,
             focused_panel: focused_window,

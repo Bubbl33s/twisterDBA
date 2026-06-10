@@ -19,8 +19,10 @@ impl super::super::AppState {
                 self.explorer_toggle_expand();
             },
             KeyCode::Char('R') => {
-                if let Some(tx) = self.db_tx.clone() {
-                    let _ = tx.send(DbCommand::LoadSchema);
+                if let Some(ref conn_name) = self.active_connection.clone()
+                    && let Some(tx) = self.db_tx.clone()
+                {
+                    let _ = tx.send(DbCommand::LoadSchema { connection_name: conn_name.clone() });
                 }
             },
             KeyCode::Esc => {
@@ -60,8 +62,11 @@ impl super::super::AppState {
                     if let (Some(schema), Some(table)) = (schema, table) {
                         self.explorer.expand_node(idx);
                         self.explorer.set_loading_child(&schema, &table);
-                        if let Some(tx) = self.db_tx.clone() {
+                        if let Some(ref conn_name) = self.active_connection.clone()
+                            && let Some(tx) = self.db_tx.clone()
+                        {
                             let _ = tx.send(DbCommand::LoadColumns {
+                                connection_name: conn_name.clone(),
                                 schema: schema.clone(),
                                 table: table.clone(),
                             });
