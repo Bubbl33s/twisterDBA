@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# twisterDBA pre-commit hook
+# Runs rustfmt and clippy on staged Rust files before committing.
+set -euo pipefail
+
+STAGED_RS=$(git diff --cached --name-only --diff-filter=ACM -- '*.rs')
+
+if [ -z "$STAGED_RS" ]; then
+    exit 0
+fi
+
+echo "== twisterDBA pre-commit =="
+
+check_available() {
+    if ! command -v "$1" &>/dev/null; then
+        echo "ERROR: $1 not found. Install it or bypass with git commit --no-verify"
+        exit 1
+    fi
+}
+
+check_available cargo
+check_available rustfmt
+
+echo ""
+
+# 1. cargo fmt --check on all project files (not just staged — fmt must pass globally)
+echo "--- cargo fmt --check ---"
+if cargo fmt --check 2>&1; then
+    echo "  OK"
+else
+    echo ""
+    echo "  FAILED: run 'cargo fmt' or 'make fix' to format."
+    echo ""
+    exit 1
+fi
+
+echo ""
+
+# 2. cargo clippy on all project files
+echo "--- cargo clippy ---"
+if cargo clippy -- -D warnings 2>&1; then
+    echo "  OK"
+else
+    echo ""
+    echo "  FAILED: fix clippy warnings before committing."
+    echo "  Run 'cargo clippy --fix --allow-dirty' or 'make fix'."
+    echo ""
+    exit 1
+fi
+
+echo ""
+echo "Pre-commit checks passed."

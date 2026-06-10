@@ -1,0 +1,25 @@
+/target
+
+# Rust DX tools
+.bacon-locations
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Build artifacts
+*.wasm
+
+# Node
+node_modules/

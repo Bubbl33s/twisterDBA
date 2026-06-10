@@ -1,0 +1,19 @@
+# rustfmt.toml — twisterDBA formatting rules
+# Stable-channel options only.
+
+edition = "2024"
+max_width = 100
+use_small_heuristics = "Max"
+newline_style = "Unix"
+tab_spaces = 4
+
+# Shorthands
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# Structs and enums
+match_block_trailing_comma = true
+
+# Misc
+reorder_imports = true
+reorder_modules = true

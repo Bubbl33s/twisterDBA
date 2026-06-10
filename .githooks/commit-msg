@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# twisterDBA commit-msg hook
+# Validates conventional commit format: type(scope): description
+set -euo pipefail
+
+COMMIT_MSG=$(cat "$1")
+
+VALID_TYPES="feat|fix|refactor|chore|docs|test|style|perf|ci|build"
+
+PATTERN="^($VALID_TYPES)(\([a-z0-9._-]+\))?!?: .+"
+
+if echo "$COMMIT_MSG" | grep -qE "$PATTERN"; then
+    exit 0
+fi
+
+echo ""
+echo "=================================================================="
+echo "  INVALID COMMIT MESSAGE FORMAT"
+echo "=================================================================="
+echo ""
+echo "  Got:      $COMMIT_MSG"
+echo ""
+echo "  Expected: type(scope): description"
+echo ""
+echo "  Valid types: feat, fix, refactor, chore, docs, test, style, perf, ci, build"
+echo ""
+echo "  Examples:"
+echo "    feat(editor): add vim-style word navigation"
+echo "    fix(explorer): handle empty schema tree"
+echo "    refactor(state): extract key handler to separate module"
+echo "    ci: add GitHub Actions workflow"
+echo "    docs: update AGENTS.md with DX guidelines"
+echo ""
+echo "=================================================================="
+exit 1
