@@ -19,6 +19,10 @@ pub struct Theme {
     pub status_disconnected: Color,
     pub dialog_type_selected_bg: Color,
     pub dialog_profile_bg: Color,
+    pub dialog_backdrop_dim: Color,
+    pub dialog_cursor_bg: Color,
+    pub dialog_cursor_fg: Color,
+    pub dialog_field_active_bg: Color,
     pub icons: IconMap,
     pub nerd_font_available: bool,
 }
@@ -51,6 +55,10 @@ impl Theme {
             status_disconnected: Color::Rgb(128, 128, 128),
             dialog_type_selected_bg: Color::Rgb(75, 110, 165),
             dialog_profile_bg: Color::Rgb(60, 63, 65),
+            dialog_backdrop_dim: Color::Rgb(10, 10, 10),
+            dialog_cursor_bg: Color::Rgb(169, 183, 198),
+            dialog_cursor_fg: Color::Rgb(30, 31, 34),
+            dialog_field_active_bg: Color::Rgb(60, 63, 65),
             icons: IconMap::darcula(),
             nerd_font_available,
         }

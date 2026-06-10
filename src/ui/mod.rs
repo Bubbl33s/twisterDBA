@@ -32,7 +32,7 @@ pub fn render(f: &mut Frame, state: &AppState) {
 
     if let Mode::ConnectDialog { form } = &state.mode {
         utils::render_dialog_backdrop(f, full_area);
-        dialog::render_connect_dialog(f, full_area, form, &state.config.connections);
+        dialog::render_connect_dialog(f, full_area, form, &state.config.connections, theme);
     }
 
     if let Some(ref popup) = state.cell_popup {

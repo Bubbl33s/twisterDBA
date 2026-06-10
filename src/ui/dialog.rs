@@ -7,22 +7,22 @@ use ratatui::{
 };
 
 use crate::state::{ConnectForm, DialogStep};
-use crate::ui::utils::centered_rect;
+use crate::theme::Theme;
+use crate::ui::utils::centered_rect_bounded;
 
 const ENGINE_NAMES: &[&str] = &["PostgreSQL", "MySQL", "SQLite"];
 const ENGINE_ICONS: &[&str] = &["\u{F06FC}", "\u{F07C0}", "\u{F021A}"];
-const ENGINE_COLORS: &[Color] =
-    &[Color::Rgb(77, 182, 172), Color::Rgb(84, 138, 247), Color::Rgb(169, 183, 198)];
 
 pub fn render_connect_dialog(
     f: &mut Frame,
     area: Rect,
     form: &ConnectForm,
     profiles: &[crate::config::ConnectionProfile],
+    theme: &Theme,
 ) {
     match form.step {
-        DialogStep::SelectType => render_step1(f, area, form, profiles),
-        DialogStep::EnterDetails => render_step2(f, area, form),
+        DialogStep::SelectType => render_step1(f, area, form, profiles, theme),
+        DialogStep::EnterDetails => render_step2(f, area, form, theme),
     }
 }
 
@@ -31,178 +31,226 @@ fn render_step1(
     area: Rect,
     form: &ConnectForm,
     profiles: &[crate::config::ConnectionProfile],
+    theme: &Theme,
 ) {
-    let popup_area = centered_rect(70, 55, area);
+    let profile_count = profiles.len();
+    let content_height: u16 = {
+        let engines: u16 = ConnectForm::ENGINE_COUNT as u16;
+        let separator: u16 = if profile_count > 0 { 2 } else { 0 };
+        let prof_rows: u16 = profile_count as u16;
+        let help: u16 = 1;
+        let padding: u16 = 2;
+        engines + separator + prof_rows + help + padding
+    };
+
+    let popup_area = centered_rect_bounded(80, 70, 50, content_height.max(12), area);
 
     let title = " New Connection ";
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .style(Style::default().bg(Color::Black));
+        .border_style(Style::default().fg(theme.identifier))
+        .style(Style::default().bg(theme.editor_bg));
 
     let inner = block.inner(popup_area);
 
-    let profile_rows: u16 = if profiles.is_empty() { 1 } else { (profiles.len() as u16).min(6) };
-    let type_grid_height: u16 = 3;
-    let separator_height: u16 = 1;
+    let engines_height = ConnectForm::ENGINE_COUNT as u16;
+    let separator_height: u16 = if profile_count > 0 { 2 } else { 0 };
+    let profile_rows: u16 = profile_count as u16;
     let help_height: u16 = 1;
 
-    let available = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
+    let constraints = if profile_count > 0 {
+        vec![
             Constraint::Length(1),
-            Constraint::Length(type_grid_height),
+            Constraint::Length(engines_height),
             Constraint::Length(separator_height),
             Constraint::Length(profile_rows),
             Constraint::Min(0),
             Constraint::Length(help_height),
-        ])
-        .split(inner);
+        ]
+    } else {
+        vec![
+            Constraint::Length(1),
+            Constraint::Length(engines_height),
+            Constraint::Min(0),
+            Constraint::Length(help_height),
+        ]
+    };
 
-    let _spacer = available[0];
-    let type_area = available[1];
-    let _sep = available[2];
-    let profile_area = available[3];
-    let _filler = available[4];
-    let help_area = available[5];
+    let available =
+        Layout::default().direction(Direction::Vertical).constraints(constraints).split(inner);
 
-    render_type_grid(f, type_area, form);
-    render_profile_list(f, profile_area, form, profiles);
-    render_step1_help(f, help_area);
+    let mut idx = 0;
+    let _spacer = available[idx];
+    idx += 1;
+    let engine_area = available[idx];
+    idx += 1;
+
+    if profile_count > 0 {
+        let sep_area = available[idx];
+        idx += 1;
+        let sep_line = Paragraph::new(Line::from(Span::styled(
+            " ──────────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )))
+        .style(Style::default().bg(theme.editor_bg));
+        f.render_widget(sep_line, sep_area);
+
+        let profile_area = available[idx];
+        render_profile_list_vertical(f, engine_area, profile_area, form, profiles, theme);
+    } else {
+        render_engine_list(f, engine_area, form, theme);
+    }
+
+    let help_area = available[available.len() - 1];
+    render_step1_help(f, help_area, theme);
 
     f.render_widget(block, popup_area);
 }
 
-fn render_type_grid(f: &mut Frame, area: Rect, form: &ConnectForm) {
-    let col_width = area.width / 3;
+fn render_engine_list(f: &mut Frame, area: Rect, form: &ConnectForm, theme: &Theme) {
     let mut lines: Vec<Line> = Vec::new();
 
-    let mut icon_line = Vec::new();
-    let mut name_line = Vec::new();
-
-    for i in 0..3 {
-        let is_selected = form.type_cursor == i && form.selected_profile.is_none();
-        let bg = if is_selected { ENGINE_COLORS[i] } else { Color::Black };
-        let fg = if is_selected { Color::Black } else { ENGINE_COLORS[i] };
-
+    for i in 0..ConnectForm::ENGINE_COUNT {
+        let is_selected = form.cursor_position == i;
         let icon = ENGINE_ICONS[i];
         let name = ENGINE_NAMES[i];
 
-        let pad = if col_width > 10 { (col_width as usize - 10) / 2 } else { 0 };
-        let pad_str = " ".repeat(pad);
+        let icon_color = match i {
+            0 => theme.icons.postgres.1,
+            1 => theme.icons.mysql.1,
+            _ => theme.icons.sqlite.1,
+        };
 
-        icon_line
-            .push(Span::styled(format!("{}{}  ", pad_str, icon), Style::default().fg(fg).bg(bg)));
-        icon_line.push(Span::styled(
-            format!("{}{}", " ".repeat(col_width as usize - pad - 3), ""),
-            Style::default().bg(bg),
-        ));
+        let bg = if is_selected { theme.dialog_type_selected_bg } else { theme.editor_bg };
+        let fg = if is_selected { Color::White } else { Color::Gray };
 
-        name_line.push(Span::styled(
-            format!("{}{}  ", pad_str, name),
-            Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
-        ));
-        name_line.push(Span::styled(
-            format!("{}{}", " ".repeat(col_width as usize - pad - 3), ""),
-            Style::default().bg(bg),
-        ));
+        let mut spans = vec![
+            Span::styled(
+                format!("{} ", if is_selected { ">" } else { " " }),
+                Style::default().fg(fg).bg(bg),
+            ),
+            Span::styled(format!("{} ", icon), Style::default().fg(icon_color).bg(bg)),
+            Span::styled(
+                name.to_string(),
+                Style::default().fg(fg).bg(bg).add_modifier(Modifier::BOLD),
+            ),
+        ];
+
+        let remaining = area.width as usize;
+        let current_len: usize = spans.iter().map(|s| s.content.len()).sum();
+        if current_len < remaining {
+            spans.push(Span::styled(" ".repeat(remaining - current_len), Style::default().bg(bg)));
+        }
+
+        lines.push(Line::from(spans));
     }
-
-    lines.push(Line::from(icon_line));
-    lines.push(Line::from(name_line));
-    lines.push(Line::from(""));
 
     f.render_widget(Paragraph::new(lines), area);
 }
 
-fn render_profile_list(
+fn render_profile_list_vertical(
     f: &mut Frame,
-    area: Rect,
+    engine_area: Rect,
+    profile_area: Rect,
     form: &ConnectForm,
     profiles: &[crate::config::ConnectionProfile],
+    theme: &Theme,
 ) {
+    render_engine_list(f, engine_area, form, theme);
+
     let mut lines: Vec<Line> = Vec::new();
 
     lines.push(Line::from(Span::styled(
         " Saved Connections:",
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
+        Style::default().fg(theme.identifier).add_modifier(Modifier::BOLD).bg(theme.editor_bg),
     )));
 
-    if profiles.is_empty() {
-        lines.push(Line::from(Span::styled(
-            "   (no saved connections)",
-            Style::default().fg(Color::DarkGray),
-        )));
-    } else {
-        for (i, p) in profiles.iter().enumerate() {
-            let is_selected = form.selected_profile == Some(i);
-            let engine_idx = match p.db_type.as_str() {
-                "mysql" => 1,
-                "sqlite" => 2,
-                _ => 0,
-            };
-            let icon = ENGINE_ICONS[engine_idx];
-            let icon_color = ENGINE_COLORS[engine_idx];
+    for (i, p) in profiles.iter().enumerate() {
+        let cursor_pos = ConnectForm::ENGINE_COUNT + i;
+        let is_selected = form.cursor_position == cursor_pos;
+        let engine_idx = match p.db_type.as_str() {
+            "mysql" => 1,
+            "sqlite" => 2,
+            _ => 0,
+        };
+        let icon = ENGINE_ICONS[engine_idx];
+        let icon_color = match engine_idx {
+            0 => theme.icons.postgres.1,
+            1 => theme.icons.mysql.1,
+            _ => theme.icons.sqlite.1,
+        };
 
-            let bg = if is_selected { Color::Rgb(60, 63, 65) } else { Color::Black };
-            let name_style = if is_selected {
-                Style::default().fg(Color::White).bg(bg)
-            } else {
-                Style::default().fg(Color::Gray).bg(bg)
-            };
+        let bg = if is_selected { theme.dialog_type_selected_bg } else { theme.editor_bg };
+        let name_style = if is_selected {
+            Style::default().fg(Color::White).bg(bg)
+        } else {
+            Style::default().fg(Color::Gray).bg(bg)
+        };
 
-            let line_text = format!("  {} {} ({})", icon, p.name, p.host);
-            let mut spans = vec![
-                Span::styled(format!("  {} ", icon), Style::default().fg(icon_color).bg(bg)),
-                Span::styled(format!("{} ", p.name), name_style),
-                Span::styled(format!("({})", p.host), Style::default().fg(Color::DarkGray).bg(bg)),
-            ];
+        let mut spans = vec![
+            Span::styled(
+                format!("{} ", if is_selected { ">" } else { " " }),
+                Style::default().fg(if is_selected { Color::White } else { Color::Gray }).bg(bg),
+            ),
+            Span::styled(format!("{} ", icon), Style::default().fg(icon_color).bg(bg)),
+            Span::styled(format!("{} ", p.name), name_style),
+            Span::styled(format!("({})", p.host), Style::default().fg(Color::DarkGray).bg(bg)),
+        ];
 
-            let remaining = area.width as usize;
-            let current_len: usize = spans.iter().map(|s| s.content.len()).sum();
-            if current_len < remaining {
-                spans.push(Span::styled(
-                    " ".repeat(remaining - current_len),
-                    Style::default().bg(bg),
-                ));
-            }
-
-            let _ = line_text;
-            lines.push(Line::from(spans));
+        let remaining = profile_area.width as usize;
+        let current_len: usize = spans.iter().map(|s| s.content.len()).sum();
+        if current_len < remaining {
+            spans.push(Span::styled(" ".repeat(remaining - current_len), Style::default().bg(bg)));
         }
+
+        lines.push(Line::from(spans));
     }
 
-    f.render_widget(Paragraph::new(lines), area);
+    f.render_widget(Paragraph::new(lines), profile_area);
 }
 
-fn render_step1_help(f: &mut Frame, area: Rect) {
+fn render_step1_help(f: &mut Frame, area: Rect, theme: &Theme) {
     let help_spans = vec![
-        Span::styled("←→↑↓", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "↑↓/jk",
+            Style::default().fg(theme.statusline_active_bg).add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":navigate  "),
-        Span::styled("Enter", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Enter",
+            Style::default().fg(theme.statusline_active_bg).add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":select  "),
-        Span::styled("Esc", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Esc",
+            Style::default().fg(theme.statusline_active_bg).add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":cancel"),
     ];
     let help_paragraph =
-        Paragraph::new(Line::from(help_spans)).style(Style::default().bg(Color::Black));
+        Paragraph::new(Line::from(help_spans)).style(Style::default().bg(theme.editor_bg));
     f.render_widget(help_paragraph, area);
 }
 
-fn render_step2(f: &mut Frame, area: Rect, form: &ConnectForm) {
-    let popup_area = centered_rect(60, 60, area);
+fn render_step2(f: &mut Frame, area: Rect, form: &ConnectForm, theme: &Theme) {
+    let label_width: u16 = 12;
+    let has_ssl = form.db_type == 0;
+    let field_count = 1 + form.fields.len() + if has_ssl { 1 } else { 0 };
+    let content_height: u16 =
+        (field_count as u16) + 1 + if form.name_conflict { 2 } else { 0 } + 1 + 2;
+
+    let popup_area = centered_rect_bounded(80, 70, 60, content_height.max(12), area);
 
     let title = " New Connection ";
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title)
-        .style(Style::default().bg(Color::Black));
+        .border_style(Style::default().fg(theme.identifier))
+        .style(Style::default().bg(theme.editor_bg));
 
     let inner = block.inner(popup_area);
 
-    let label_width: u16 = 12;
-    let has_ssl = form.db_type == 0;
-    let field_count = 1 + form.fields.len() + if has_ssl { 1 } else { 0 };
     let field_height = field_count as u16 + 1;
     let warning_height: u16 = if form.name_conflict { 2 } else { 0 };
     let help_height: u16 = 1;
@@ -224,7 +272,7 @@ fn render_step2(f: &mut Frame, area: Rect, form: &ConnectForm) {
     let _filler = available[3];
     let help_area = available[4];
 
-    render_step2_fields(f, form_area, form, label_width);
+    render_step2_fields(f, form_area, form, label_width, theme);
 
     if let Some(warn_area) = warning_area {
         let name = &form.connection_name;
@@ -239,17 +287,23 @@ fn render_step2(f: &mut Frame, area: Rect, form: &ConnectForm) {
             ),
         ];
         f.render_widget(
-            Paragraph::new(Line::from(warn_spans)).style(Style::default().bg(Color::Black)),
+            Paragraph::new(Line::from(warn_spans)).style(Style::default().bg(theme.editor_bg)),
             warn_area,
         );
     }
 
-    render_step2_help(f, help_area, form);
+    render_step2_help(f, help_area, form, theme);
 
     f.render_widget(block, popup_area);
 }
 
-fn render_step2_fields(f: &mut Frame, area: Rect, form: &ConnectForm, label_width: u16) {
+fn render_step2_fields(
+    f: &mut Frame,
+    area: Rect,
+    form: &ConnectForm,
+    label_width: u16,
+    theme: &Theme,
+) {
     let mut lines: Vec<Line> = Vec::new();
 
     lines.push(render_editable_field(
@@ -262,6 +316,7 @@ fn render_step2_fields(f: &mut Frame, area: Rect, form: &ConnectForm, label_widt
         label_width,
         area.width,
         None,
+        theme,
     ));
 
     for (i, field) in form.fields.iter().enumerate() {
@@ -278,6 +333,7 @@ fn render_step2_fields(f: &mut Frame, area: Rect, form: &ConnectForm, label_widt
             label_width,
             area.width,
             None,
+            theme,
         ));
     }
 
@@ -296,6 +352,7 @@ fn render_step2_fields(f: &mut Frame, area: Rect, form: &ConnectForm, label_widt
             label_width,
             area.width,
             Some(ssl_value),
+            theme,
         ));
     }
 
@@ -313,13 +370,14 @@ fn render_editable_field(
     label_width: u16,
     total_width: u16,
     _ssl_value: Option<&str>,
+    theme: &Theme,
 ) -> Line<'static> {
     let label_str =
         format!(" {:>width$} ", label, width = (label_width as usize).saturating_sub(2));
     let label_span = Span::styled(
         label_str,
         if is_active {
-            Style::default().fg(Color::Black).bg(Color::Cyan)
+            Style::default().fg(Color::White).bg(theme.dialog_field_active_bg)
         } else {
             Style::default().fg(Color::DarkGray)
         },
@@ -329,19 +387,22 @@ fn render_editable_field(
 
     let keychain_note = if keychain_loaded { " [from keychain]" } else { "" };
 
-    let field_bg = if is_active { Color::DarkGray } else { Color::Black };
+    let field_bg = if is_active { theme.dialog_field_active_bg } else { theme.editor_bg };
     let field_fg = if is_active { Color::White } else { Color::Gray };
 
     let mut field_spans: Vec<Span> = Vec::new();
 
     if is_active && display_value.is_empty() {
-        field_spans.push(Span::styled("█", Style::default().fg(Color::Yellow).bg(field_bg)));
+        field_spans.push(Span::styled(
+            "\u{258C}",
+            Style::default().fg(theme.dialog_cursor_bg).bg(theme.dialog_cursor_fg),
+        ));
     } else {
         for (ci, ch) in display_value.chars().enumerate() {
             if is_active && ci == cursor && ci < display_value.len() {
                 field_spans.push(Span::styled(
                     ch.to_string(),
-                    Style::default().fg(Color::Black).bg(Color::Cyan),
+                    Style::default().fg(theme.dialog_cursor_bg).bg(theme.dialog_cursor_fg),
                 ));
             } else {
                 field_spans
@@ -349,7 +410,10 @@ fn render_editable_field(
             }
         }
         if is_active && cursor >= display_value.len() {
-            field_spans.push(Span::styled(" ", Style::default().fg(Color::Black).bg(Color::Cyan)));
+            field_spans.push(Span::styled(
+                " ",
+                Style::default().fg(theme.dialog_cursor_bg).bg(theme.dialog_cursor_fg),
+            ));
         }
     }
 
@@ -368,24 +432,33 @@ fn render_editable_field(
     Line::from(spans)
 }
 
-fn render_step2_help(f: &mut Frame, area: Rect, form: &ConnectForm) {
+fn render_step2_help(f: &mut Frame, area: Rect, form: &ConnectForm, theme: &Theme) {
     let mut help_spans = vec![
-        Span::styled("Tab/↓↑", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Tab/↓↑",
+            Style::default().fg(theme.statusline_active_bg).add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":next  "),
-        Span::styled("Esc", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Esc",
+            Style::default().fg(theme.statusline_active_bg).add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":back  "),
-        Span::styled("Enter", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "Enter",
+            Style::default().fg(theme.statusline_active_bg).add_modifier(Modifier::BOLD),
+        ),
         Span::raw(":connect"),
     ];
     if form.db_type == 0 {
         help_spans.push(Span::raw("  "));
         help_spans.push(Span::styled(
             "←→",
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme.statusline_active_bg).add_modifier(Modifier::BOLD),
         ));
         help_spans.push(Span::raw(":ssl-mode"));
     }
     let help_paragraph =
-        Paragraph::new(Line::from(help_spans)).style(Style::default().bg(Color::Black));
+        Paragraph::new(Line::from(help_spans)).style(Style::default().bg(theme.editor_bg));
     f.render_widget(help_paragraph, area);
 }

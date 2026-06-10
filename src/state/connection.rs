@@ -38,17 +38,33 @@ pub struct ConnectForm {
     pub fields: Vec<ConnectField>,
     pub active_field: usize,
     pub db_type: usize,
-    pub selected_profile: Option<usize>,
     pub connection_name: String,
     pub connection_name_cursor: usize,
     pub ssl_mode: usize,
-    pub type_cursor: usize,
+    pub cursor_position: usize,
     pub name_conflict: bool,
 }
 
 impl ConnectForm {
     pub const SSL_MODES: &[&str] =
         &["disable", "allow", "prefer", "require", "verify-ca", "verify-full"];
+    pub const ENGINE_COUNT: usize = 3;
+
+    pub fn is_engine_selected(&self) -> bool {
+        self.cursor_position < Self::ENGINE_COUNT
+    }
+
+    pub fn selected_engine(&self) -> usize {
+        self.cursor_position
+    }
+
+    pub fn selected_profile_index(&self) -> Option<usize> {
+        if self.cursor_position >= Self::ENGINE_COUNT {
+            Some(self.cursor_position - Self::ENGINE_COUNT)
+        } else {
+            None
+        }
+    }
 
     pub fn default() -> Self {
         Self {
@@ -56,11 +72,10 @@ impl ConnectForm {
             fields: Self::fields_for_engine(0),
             active_field: 0,
             db_type: 0,
-            selected_profile: None,
             connection_name: String::new(),
             connection_name_cursor: 0,
             ssl_mode: 2,
-            type_cursor: 0,
+            cursor_position: 0,
             name_conflict: false,
         }
     }
@@ -221,11 +236,10 @@ impl ConnectForm {
             fields,
             active_field: 0,
             db_type,
-            selected_profile: None,
             connection_name_cursor: connection_name.len(),
             connection_name,
             ssl_mode: 2,
-            type_cursor: db_type,
+            cursor_position: db_type,
             name_conflict: false,
         }
     }

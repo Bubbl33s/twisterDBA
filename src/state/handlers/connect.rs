@@ -16,121 +16,108 @@ impl super::super::AppState {
 
     fn handle_step1_key(&mut self, key: KeyEvent) {
         let profile_count = self.config.connections.len();
+        let total_items = crate::state::ConnectForm::ENGINE_COUNT + profile_count;
         if let Mode::ConnectDialog { form } = &mut self.mode {
             match key.code {
                 KeyCode::Esc => {
                     self.mode = Mode::Normal;
                 },
-                KeyCode::Left => {
-                    if form.selected_profile.is_none() {
-                        form.type_cursor =
-                            if form.type_cursor == 0 { 2 } else { form.type_cursor - 1 };
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if form.cursor_position == 0 {
+                        form.cursor_position = total_items.saturating_sub(1);
+                    } else {
+                        form.cursor_position -= 1;
                     }
                 },
-                KeyCode::Right => {
-                    if form.selected_profile.is_none() {
-                        form.type_cursor = (form.type_cursor + 1) % 3;
-                    }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    form.cursor_position = (form.cursor_position + 1) % total_items;
                 },
-                KeyCode::Down => {
-                    if form.selected_profile.is_none() {
-                        if profile_count > 0 {
-                            form.selected_profile = Some(0);
-                        }
-                    } else if let Some(ref mut idx) = form.selected_profile
-                        && *idx + 1 < profile_count
-                    {
-                        *idx += 1;
-                    }
-                },
-                KeyCode::Up => {
-                    if let Some(ref mut idx) = form.selected_profile {
-                        if *idx == 0 {
-                            form.selected_profile = None;
-                        } else {
-                            *idx -= 1;
-                        }
+                KeyCode::Left | KeyCode::Right => {
+                    if form.cursor_position == 0 {
+                        form.cursor_position = total_items.saturating_sub(1);
+                    } else {
+                        form.cursor_position -= 1;
                     }
                 },
                 KeyCode::Enter => {
-                    if let Some(profile_idx) = form.selected_profile {
-                        if let Some(profile) = self.config.connections.get(profile_idx).cloned() {
-                            let db_type = match profile.db_type.as_str() {
-                                "mysql" => 1,
-                                "sqlite" => 2,
-                                _ => 0,
-                            };
-                            let (password_value, keychain_loaded) =
-                                if profile.password_is_keychain() {
-                                    match profile.get_password() {
-                                        Ok(pass) => (pass, true),
-                                        Err(_) => (String::new(), false),
-                                    }
-                                } else {
-                                    (String::new(), false)
-                                };
-                            form.db_type = db_type;
-                            form.fields = match db_type {
-                                2 => vec![crate::state::ConnectField {
-                                    label: "File Path",
-                                    value: profile.host.clone(),
-                                    cursor: profile.host.len(),
-                                    masked: false,
-                                    keychain_loaded: false,
-                                }],
-                                _ => vec![
-                                    crate::state::ConnectField {
-                                        label: "Host",
-                                        value: profile.host.clone(),
-                                        cursor: profile.host.len(),
-                                        masked: false,
-                                        keychain_loaded: false,
-                                    },
-                                    crate::state::ConnectField {
-                                        label: "Port",
-                                        value: profile.port.to_string(),
-                                        cursor: profile.port.to_string().len(),
-                                        masked: false,
-                                        keychain_loaded: false,
-                                    },
-                                    crate::state::ConnectField {
-                                        label: "Database",
-                                        value: profile.database.clone(),
-                                        cursor: profile.database.len(),
-                                        masked: false,
-                                        keychain_loaded: false,
-                                    },
-                                    crate::state::ConnectField {
-                                        label: "User",
-                                        value: profile.user.clone(),
-                                        cursor: profile.user.len(),
-                                        masked: false,
-                                        keychain_loaded: false,
-                                    },
-                                    crate::state::ConnectField {
-                                        label: "Password",
-                                        value: password_value,
-                                        cursor: 0,
-                                        masked: true,
-                                        keychain_loaded,
-                                    },
-                                ],
-                            };
-                            form.connection_name = profile.name.clone();
-                            form.connection_name_cursor = profile.name.len();
-                            form.ssl_mode = 2;
-                            form.type_cursor = db_type;
-                            form.active_field = 0;
-                            form.name_conflict = false;
-                            form.step = DialogStep::EnterDetails;
-                        }
-                    } else {
-                        form.db_type = form.type_cursor;
+                    if form.is_engine_selected() {
+                        let engine = form.selected_engine();
+                        form.db_type = engine;
                         form.fields =
                             crate::state::ConnectForm::fields_for_engine_pub(form.db_type);
                         let name = form.auto_generate_name();
                         form.connection_name_cursor = name.len();
                         form.connection_name = name;
+                        form.active_field = 0;
+                        form.name_conflict = false;
+                        form.step = DialogStep::EnterDetails;
+                    } else if let Some(profile_idx) = form.selected_profile_index()
+                        && let Some(profile) = self.config.connections.get(profile_idx).cloned()
+                    {
+                        let db_type = match profile.db_type.as_str() {
+                            "mysql" => 1,
+                            "sqlite" => 2,
+                            _ => 0,
+                        };
+                        let (password_value, keychain_loaded) = if profile.password_is_keychain() {
+                            match profile.get_password() {
+                                Ok(pass) => (pass, true),
+                                Err(_) => (String::new(), false),
+                            }
+                        } else {
+                            (String::new(), false)
+                        };
+                        form.db_type = db_type;
+                        form.fields = match db_type {
+                            2 => vec![crate::state::ConnectField {
+                                label: "File Path",
+                                value: profile.host.clone(),
+                                cursor: profile.host.len(),
+                                masked: false,
+                                keychain_loaded: false,
+                            }],
+                            _ => vec![
+                                crate::state::ConnectField {
+                                    label: "Host",
+                                    value: profile.host.clone(),
+                                    cursor: profile.host.len(),
+                                    masked: false,
+                                    keychain_loaded: false,
+                                },
+                                crate::state::ConnectField {
+                                    label: "Port",
+                                    value: profile.port.to_string(),
+                                    cursor: profile.port.to_string().len(),
+                                    masked: false,
+                                    keychain_loaded: false,
+                                },
+                                crate::state::ConnectField {
+                                    label: "Database",
+                                    value: profile.database.clone(),
+                                    cursor: profile.database.len(),
+                                    masked: false,
+                                    keychain_loaded: false,
+                                },
+                                crate::state::ConnectField {
+                                    label: "User",
+                                    value: profile.user.clone(),
+                                    cursor: profile.user.len(),
+                                    masked: false,
+                                    keychain_loaded: false,
+                                },
+                                crate::state::ConnectField {
+                                    label: "Password",
+                                    value: password_value,
+                                    cursor: 0,
+                                    masked: true,
+                                    keychain_loaded,
+                                },
+                            ],
+                        };
+                        form.connection_name = profile.name.clone();
+                        form.connection_name_cursor = profile.name.len();
+                        form.ssl_mode = 2;
+                        form.cursor_position = db_type;
                         form.active_field = 0;
                         form.name_conflict = false;
                         form.step = DialogStep::EnterDetails;

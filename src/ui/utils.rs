@@ -2,7 +2,7 @@ use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
-    text::{Line, Span, Text},
+    text::{Line, Span},
     widgets::Paragraph,
 };
 
@@ -26,13 +26,28 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
-pub fn render_dialog_backdrop(f: &mut Frame, area: Rect) {
-    use ratatui::widgets::Clear;
-    f.render_widget(Clear, area);
-    let backdrop =
-        Paragraph::new(Text::from("")).style(Style::default().bg(Color::Rgb(20, 20, 20)));
-    f.render_widget(backdrop, area);
+pub fn centered_rect_bounded(
+    percent_x: u16,
+    percent_y: u16,
+    max_width: u16,
+    max_height: u16,
+    r: Rect,
+) -> Rect {
+    let mut rect = centered_rect(percent_x, percent_y, r);
+    if rect.width > max_width {
+        let excess = rect.width - max_width;
+        rect.x += excess / 2;
+        rect.width = max_width;
+    }
+    if rect.height > max_height {
+        let excess = rect.height - max_height;
+        rect.y += excess / 2;
+        rect.height = max_height;
+    }
+    rect
 }
+
+pub fn render_dialog_backdrop(_f: &mut Frame, _area: Rect) {}
 
 pub fn format_count(n: u64) -> String {
     if n < 1000 {
