@@ -27,18 +27,95 @@ pub struct ConnectField {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum DialogStep {
+    SelectType,
+    EnterDetails,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConnectForm {
+    pub step: DialogStep,
     pub fields: Vec<ConnectField>,
     pub active_field: usize,
     pub db_type: usize,
-    pub selecting_type: bool,
     pub selected_profile: Option<usize>,
+    pub connection_name: String,
+    pub connection_name_cursor: usize,
+    pub ssl_mode: usize,
+    pub type_cursor: usize,
+    pub name_conflict: bool,
 }
 
 impl ConnectForm {
+    pub const SSL_MODES: &[&str] =
+        &["disable", "allow", "prefer", "require", "verify-ca", "verify-full"];
+
     pub fn default() -> Self {
         Self {
-            fields: vec![
+            step: DialogStep::SelectType,
+            fields: Self::fields_for_engine(0),
+            active_field: 0,
+            db_type: 0,
+            selected_profile: None,
+            connection_name: String::new(),
+            connection_name_cursor: 0,
+            ssl_mode: 2,
+            type_cursor: 0,
+            name_conflict: false,
+        }
+    }
+
+    pub fn fields_for_engine_pub(db_type: usize) -> Vec<ConnectField> {
+        Self::fields_for_engine(db_type)
+    }
+
+    fn fields_for_engine(db_type: usize) -> Vec<ConnectField> {
+        match db_type {
+            1 => vec![
+                ConnectField {
+                    label: "Host",
+                    value: "localhost".into(),
+                    cursor: 9,
+                    masked: false,
+                    keychain_loaded: false,
+                },
+                ConnectField {
+                    label: "Port",
+                    value: "3306".into(),
+                    cursor: 4,
+                    masked: false,
+                    keychain_loaded: false,
+                },
+                ConnectField {
+                    label: "Database",
+                    value: String::new(),
+                    cursor: 0,
+                    masked: false,
+                    keychain_loaded: false,
+                },
+                ConnectField {
+                    label: "User",
+                    value: String::new(),
+                    cursor: 0,
+                    masked: false,
+                    keychain_loaded: false,
+                },
+                ConnectField {
+                    label: "Password",
+                    value: String::new(),
+                    cursor: 0,
+                    masked: true,
+                    keychain_loaded: false,
+                },
+            ],
+            2 => vec![ConnectField {
+                label: "File Path",
+                value: String::new(),
+                cursor: 0,
+                masked: false,
+                keychain_loaded: false,
+            }],
+            _ => vec![
                 ConnectField {
                     label: "Host",
                     value: "localhost".into(),
@@ -75,10 +152,6 @@ impl ConnectForm {
                     keychain_loaded: false,
                 },
             ],
-            active_field: 0,
-            db_type: 0,
-            selecting_type: true,
-            selected_profile: None,
         }
     }
 
@@ -96,8 +169,15 @@ impl ConnectForm {
         } else {
             (String::new(), false)
         };
-        Self {
-            fields: vec![
+        let fields = match db_type {
+            2 => vec![ConnectField {
+                label: "File Path",
+                value: profile.host.clone(),
+                cursor: profile.host.len(),
+                masked: false,
+                keychain_loaded: false,
+            }],
+            _ => vec![
                 ConnectField {
                     label: "Host",
                     value: profile.host.clone(),
@@ -134,11 +214,31 @@ impl ConnectForm {
                     keychain_loaded,
                 },
             ],
+        };
+        let connection_name = profile.name.clone();
+        Self {
+            step: DialogStep::EnterDetails,
+            fields,
             active_field: 0,
             db_type,
-            selecting_type: false,
             selected_profile: None,
+            connection_name_cursor: connection_name.len(),
+            connection_name,
+            ssl_mode: 2,
+            type_cursor: db_type,
+            name_conflict: false,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn from_profile_with_name(
+        profile: &crate::config::ConnectionProfile,
+        name: String,
+    ) -> Self {
+        let mut form = Self::from_profile(profile);
+        form.connection_name = name.clone();
+        form.connection_name_cursor = name.len();
+        form
     }
 
     pub fn engine_type(&self) -> EngineType {
@@ -147,6 +247,25 @@ impl ConnectForm {
             2 => EngineType::Sqlite,
             _ => EngineType::Postgres,
         }
+    }
+
+    pub fn auto_generate_name(&self) -> String {
+        let engine_prefix = match self.db_type {
+            1 => "mysql",
+            2 => "sqlite",
+            _ => "postgres",
+        };
+        let host = self.fields.first().map(|f| f.value.as_str()).unwrap_or("localhost");
+        if host.is_empty() {
+            format!("{}-localhost", engine_prefix)
+        } else {
+            format!("{}-{}", engine_prefix, host)
+        }
+    }
+
+    pub fn total_field_count(&self) -> usize {
+        let base = 1 + self.fields.len();
+        if self.db_type == 0 { base + 1 } else { base }
     }
 
     pub fn build_dsn(&self) -> String {
@@ -187,6 +306,8 @@ impl ConnectForm {
             dsn.push('/');
             dsn.push_str(db);
         }
+        let ssl_mode = Self::SSL_MODES[self.ssl_mode];
+        dsn.push_str(&format!("?sslmode={}", ssl_mode));
         dsn
     }
 
@@ -263,6 +384,8 @@ impl ConnectForm {
             dsn.push('/');
             dsn.push_str(db);
         }
+        let ssl_mode = Self::SSL_MODES[self.ssl_mode];
+        dsn.push_str(&format!("?sslmode={}", ssl_mode));
         dsn
     }
 

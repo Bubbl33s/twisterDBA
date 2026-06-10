@@ -17,6 +17,8 @@ pub struct Theme {
     pub status_connecting: Color,
     pub status_error: Color,
     pub status_disconnected: Color,
+    pub dialog_type_selected_bg: Color,
+    pub dialog_profile_bg: Color,
     pub icons: IconMap,
     pub nerd_font_available: bool,
 }
@@ -47,6 +49,8 @@ impl Theme {
             status_connecting: Color::Rgb(230, 200, 50),
             status_error: Color::Rgb(220, 60, 60),
             status_disconnected: Color::Rgb(128, 128, 128),
+            dialog_type_selected_bg: Color::Rgb(75, 110, 165),
+            dialog_profile_bg: Color::Rgb(60, 63, 65),
             icons: IconMap::darcula(),
             nerd_font_available,
         }

@@ -19,7 +19,7 @@ use crate::lua::LuaRuntime;
 use crate::result::ResultGrid;
 use crate::theme::Theme;
 
-pub use connection::{ConnectField, ConnectForm, ConnectionEntry, ConnectionStatus};
+pub use connection::{ConnectField, ConnectForm, ConnectionEntry, ConnectionStatus, DialogStep};
 pub use handlers::command::mask_raw_dsn;
 pub use mode::{Mode, SplitDirection, Window};
 pub use output::{CellPopupState, OutputPaneState, OutputResultsState};
